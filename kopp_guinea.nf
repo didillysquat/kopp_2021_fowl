@@ -153,92 +153,47 @@ process fastqc_post_trim{
     """
 }
 
-// TODO we want to make the nextgenmap index before doing the mapping
+// Index the nextgenmap index before doing the mapping
+// If the reference is already indexed, the index will not happen again
+// NB We invested a lot of time into getting the flow of this indexing process to work
+// (i.e. as a precursor to the mapping). The key is to use a value channel (rather than a queue channel)
+// or to directly create the path object from the param variable. This then means that the
+// value of this channel can be used multiple times (once for each mapping procedure).
 process nextgenmap_indexing{
     conda 'envs/ngm.yaml'
     cpus params.nextgenmap_threads
 
     input:
-    path ref_genome from ch_ref_genome
+    path ref_genome from params.ref_assembly_path
 
     output:
-    path "blank_file" into index_ch
+    path ref_genome into index_ch
 
     script:
     """
      ngm -t ${task.cpus} -r ${params.ref_assembly_path}
-     touch blank_file
     """
 }
-// ch_nextgenmap_mapping_index.view()
-// ch_ngm_paired.join(ch_ngm_unpaired).flatMap{[[it[0], [it[1][0], it[1][1], it[2][0], it[2][1]] ]]}.view()
-// ch_ngm_paired.join(ch_ngm_unpaired).flatMap{[[it[0], [it[1][0], it[1][1], it[2][0], it[2][1]] ]]}.combine(ch_nextgenmap_mapping_index)
-// ch_nextgenmap_mapping_index.flatMap{[[it[0], it[1][0], it[1][1]]]}.view()
-// ch_ngm_paired.join(ch_ngm_unpaired).flatMap{[[it[0], [it[1][0], it[1][1], it[2][0], it[2][1]] ]]}.cross(ch_nextgenmap_mapping_index.flatMap{[[it[0], it[1][0], it[1][1]]]})
-// ch_ngm_unpaired.view()
 
-// ch_ngm_paired.join(ch_ngm_unpaired).cross(ch_nextgenmap_mapping_index.flatMap{[[it[0], it[1][0], it[1][1]]]}).view()
-// // Map the trimmed reads to the helmeted guineafowl reference genome
-// //params.ref_assembly_path
-// //cat *paired.sam > ${base}mapped.sam;
-// //mv *.sam ../output/;
-// // NB the docker image is currently broken: https://github.com/Cibiv/NextGenMap/issues/54
-// // We will need to use the conda version that does seem to be working
-// ch_nextgenmap_mapping_index.flatMap{ref_path -> 
-//     def return_list = []
-//     for (i = 0; i < number_of_samples; i++){
-//         return_list << ref_path
-//     }
-//     return return_list
-//     }.view()
-
-// ch_nextgenmap_mapping_index.view()
-// ch_nextgenmap_mapping_index.flatMap{ref_path -> 
-//     def return_list = []
-//     for (i = 0; i < number_of_samples; i++){
-//         return_list << ref_path
-//     }
-//     return return_list
-//     }.combine(ch_ngm_paired.join(ch_ngm_unpaired)).view()
-
-
-
-// BUt the respirpical doesn't work
-// ch_ngm_paired.join(ch_ngm_unpaired).combine(ch_nextgenmap_mapping_index.flatMap{ref_path -> 
-//     def return_list = []
-//     for (i = 0; i < number_of_samples; i++){
-//         return_list << ref_path
-//     }
-//     return return_list
-//     }).view()
-
-// ch_ngm_paired.join(ch_ngm_unpaired).combine(ch_nextgenmap_mapping_index.flatMap{ref_path -> 
-//     def return_list = []
-//     for (i = 0; i < number_of_samples; i++){
-//         return_list << ref_path
-//     }
-//     return return_list
-//     }).view()
-//  ngm -t ${task.cpus} -r ${params.ref_assembly_path} -q ${unpaired[0]} -o ${pair_id}_U1_mapped.sam;
-//    ngm -t ${task.cpus} -r ${params.ref_assembly_path} -q ${unpaired[1]} -o ${pair_id}_U2_mapped.sam;
-//  cat *mapped.sam > ${pair_id}_allreads_mapped.sam
+// We don't use the genome variable that comes from the index_ch
+// This input is only there to ensure that the indexing has been performed before the mapping
 process nextgenmap_mapping{
     tag "${fastq_file}"
     conda 'envs/ngm.yaml'
     cpus params.nextgenmap_threads
 
     input:
-    path genome from params.ref_assembly_path
-    file index from index_ch
-	tuple val(pair_id), file(paired) from ch_ngm_paired
+    path genome from index_ch
+	tuple val(pair_id), file(paired), file(unpaired) from ch_ngm_paired.join(ch_ngm_unpaired)
 
     output:
-    tuple file("${pair_id}_paired_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam"), file("${pair_id}_allreads_mapped.sam") into ch_mark_duplicates
+    tuple file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam"), file("${pair_id}_allreads_mapped.sam") into ch_mark_duplicates
 
     script:
     """
-    ngm -t ${task.cpus} -r ${params.ref_assembly_path} -1 ${paired[0]} -2 ${paired[1]} -o ${pair_id}_paired_mapped.sam;
-    
-    
+    ngm -t ${task.cpus} -r ${params.ref_assembly_path} -1 ${paired[0]} -2 ${paired[1]} -o ${pair_id}_P_mapped.sam;
+    ngm -t ${task.cpus} -r ${params.ref_assembly_path} -q ${unpaired[0]} -o ${pair_id}_U1_mapped.sam;
+    ngm -t ${task.cpus} -r ${params.ref_assembly_path} -q ${unpaired[1]} -o ${pair_id}_U2_mapped.sam;
+    cat *mapped.sam > ${pair_id}_allreads_mapped.sam
     """
 }

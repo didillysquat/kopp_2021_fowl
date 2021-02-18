@@ -1,1 +1,5 @@
 .nextflow.log*
+.nextflow
+nummel_ref_assembly
+outputs*
+work

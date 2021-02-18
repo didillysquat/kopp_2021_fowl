@@ -1,0 +1,5 @@
+name: ngm_env
+channels:
+  - bioconda
+dependencies:
+  - nextgenmap
