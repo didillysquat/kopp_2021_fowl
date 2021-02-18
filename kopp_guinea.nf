@@ -23,9 +23,10 @@ if (params.subsample){
     fastqc_post_trim_publish_dir = [params.output_dir, "fastqc_post_trim"].join(File.separator)
 }
 
-// Threads
+// CPUs
 params.trimmomatic_threads = 50
 params.nextgenmap_threads = 40
+params.markduplicates_cpus = 20
 
 // TODO check to see if the index file already exists. If it doesn't then generate a channel from the genome path and
 // do the index
@@ -72,7 +73,7 @@ if (params.subsample){
 
 
 process fastqc_pre_trim{
-    tag "${fastq_file}"
+    tag "${pair_id}"
     container 'trinityrnaseq/trinityrnaseq:latest'
     containerOptions '-u $(id -u):$(id -g)'
     publishDir fastqc_pre_trim_publish_dir, mode: 'copy'
@@ -133,7 +134,7 @@ process trimmomatic{
 
 // We will look specifically for the P1 P2 U1 and U2 files
 process fastqc_post_trim{
-    tag "${fastq_file}"
+    tag "${pair_id}"
     container 'trinityrnaseq/trinityrnaseq:latest'
     containerOptions '-u $(id -u):$(id -g)'
     publishDir fastqc_post_trim_publish_dir, mode: 'copy'
@@ -177,8 +178,9 @@ process nextgenmap_indexing{
 
 // We don't use the genome variable that comes from the index_ch
 // This input is only there to ensure that the indexing has been performed before the mapping
+// TODO possibly remove the all_reads. I'm not sure if we'll need this.
 process nextgenmap_mapping{
-    tag "${fastq_file}"
+    tag "${pair_id}"
     conda 'envs/ngm.yaml'
     cpus params.nextgenmap_threads
 
@@ -187,7 +189,7 @@ process nextgenmap_mapping{
 	tuple val(pair_id), file(paired), file(unpaired) from ch_ngm_paired.join(ch_ngm_unpaired)
 
     output:
-    tuple file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam"), file("${pair_id}_allreads_mapped.sam") into ch_mark_duplicates
+    tuple val(pair_id), file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam"), file("${pair_id}_allreads_mapped.sam") into ch_mark_duplicates
 
     script:
     """
@@ -195,5 +197,28 @@ process nextgenmap_mapping{
     ngm -t ${task.cpus} -r ${params.ref_assembly_path} -q ${unpaired[0]} -o ${pair_id}_U1_mapped.sam;
     ngm -t ${task.cpus} -r ${params.ref_assembly_path} -q ${unpaired[1]} -o ${pair_id}_U2_mapped.sam;
     cat *mapped.sam > ${pair_id}_allreads_mapped.sam
+    """
+}
+
+// TODO possibly remove the all_reads. I'm not sure if we'll need this.
+// containerOptions '-u $(id -u):$(id -g)'
+process markduplicates_spark{
+    tag "${pair_id}"
+    container 'broadinstitute/gatk:latest'
+    
+    cpus params.markduplicates_cpus
+
+    input:
+    tuple val(pair_id), file(paired), file(unpaired_fwd), file(unpaired_rev), file(all_reads) from ch_mark_duplicates
+
+    output:
+    tuple val(pair_id), file("${pair_id}.paired.deduplicated.sorted.bam"), file("${pair_id}.unpaired_fwd.deduplicated.sorted.bam"), file("${pair_id}.unpaired_rev.deduplicated.sorted.bam")
+    tuple file("${pair_id}.paired.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired_fwd.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired_rev.deduplicated.sorted.metrics.txt")
+
+    script:
+    """
+    gatk MarkDuplicatesSpark --remove-sequencing-duplicates --conf 'spark.executor.cores=${task.cpus}' -I ${paired} -O ${pair_id}.paired.deduplicated.sorted.bam -M ${pair_id}.paired.deduplicated.sorted.metrics.txt
+    gatk MarkDuplicatesSpark --remove-sequencing-duplicates --conf 'spark.executor.cores=${task.cpus}' -I ${unpaired_fwd} -O ${pair_id}.unpaired_fwd.deduplicated.sorted.bam -M ${pair_id}.unpaired_fwd.deduplicated.sorted.metrics.txt
+    gatk MarkDuplicatesSpark --remove-sequencing-duplicates --conf 'spark.executor.cores=${task.cpus}' -I ${unpaired_rev} -O ${pair_id}.unpaired_rev.deduplicated.sorted.bam -M ${pair_id}.unpaired_rev.deduplicated.sorted.metrics.txt
     """
 }
