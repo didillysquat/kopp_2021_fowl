@@ -3,14 +3,67 @@
 params.raw_reads_dir = "/home/humebc/projects/20210125_kopp_guinea_fowl/raw_seq_files"
 params.ref_assembly_path = "/home/humebc/projects/20210125_kopp_guinea_fowl/nf_pipeline_kopp/nummel_ref_assembly/GCF_002078875.1_NumMel1.0_genomic.fna.gz"
 
+params.path_to_read_group_lists = "/home/humebc/projects/20210125_kopp_guinea_fowl/raw_seq_files/file-list-run-1,/home/humebc/projects/20210125_kopp_guinea_fowl/raw_seq_files/file-list-run-2"
+
+
 bin_dir = "${workflow.launchDir}/bin"
 launch_dir = "${workflow.launchDir}"
 tru_seq_pe_fasta_path = "${workflow.launchDir}/TruSeq3-PE.fa"
 
-number_of_samples = new File(params.raw_reads_dir).listFiles().count { it.name ==~ /.*fastq.gz/ } / 2
-println(number_of_samples)
 params.subsample = true
 params.subsample_depth = 10000
+
+// TODO make a dictionary that maps the pair_id to the readgroup info we will need to add readgroups using
+// picard AddOrReplaceReadGroups
+// This will return a map with key that is the pair_id (taking into account whether we are subsampling
+// and therefore have a modified paid_id) and the value is the string that will be passed to the actual
+// picard AddOrReplaceReadGroups command e.g. RGID=xxx RGLB=lib1 RGPL=ILLUMINA RGPU=unit1 RGSM=xxx
+// NB it is critical to convert the key for a map to a string using .toString() if using e.g. "${my_var}"
+read_group_map = { 
+    String[] file_lists = params.path_to_read_group_lists.split(",");
+    def emptyMap = [:]
+    file_lists.eachWithIndex{ file_list, i -> 
+            // i will be the RGID value
+            // j will be the RGSM value
+        def j = 0
+        def pair_id_list = []
+        new File(file_list).eachLine {  
+            line ->
+            if (line.endsWith('.gz')){
+                
+                // The this is a seq file and we want to get its pair_id and add this to the map
+                def pattern = ~/^(?<pair>.*)_R[1-2].*$/
+                def file_name = line.split('/')[-1]
+                def matcher = file_name =~ pattern
+                if (params.subsample){
+                    
+                    if (matcher){
+                        pair_id = matcher.group("pair")
+                        if (params.subsample){
+                            pair_id = "${pair_id}_sub_${params.subsample_depth}"
+                        }
+                        // At this point we need to see if the mapping information has already been added
+                        // If it has not, then add in the mapping information 
+                        if (!pair_id_list.contains(pair_id)){
+                            pair_id_list << pair_id
+                            j++
+                            emptyMap.put("${pair_id}".toString(), "RGID=${i+1} RGLB=lib1 RGPL=ILLUMINA RGPU=unit1 RGSM=${j}")
+                        }                            
+                    }else{
+                        throw new Exception("An error has occured when making the readgroup dictionary\nNo match was found for ${file_name}")
+                    }
+                }
+            }
+        }
+    }
+    return emptyMap     
+}()
+
+
+// def bob = "mpg_L16952-1_W1446_S28_sub_10000"
+// println(read_group_map["${bob}"])
+
+// println("This is 'mpg_L16952-1_W1446_S28_sub_10000': ${read_group_map[mpg_L16952-1_W1446_S28_sub_10000]}")
 
 // Publish dirs
 if (params.subsample){
@@ -28,16 +81,13 @@ params.trimmomatic_threads = 50
 params.nextgenmap_threads = 40
 params.markduplicates_cpus = 20
 
-// TODO check to see if the index file already exists. If it doesn't then generate a channel from the genome path and
-// do the index
 
-
-/* 
-If subsample, create a channel that will pass into the subsampling process and then pass the subsampled
-files into the trimming and fastqc
-Modify the pair name to indicate subsampled files. This way it will carry through the remainder of the anlysis.
-if not subsample, then create channel directly from the raw sequencing files
-*/
+// /* 
+// If subsample, create a channel that will pass into the subsampling process and then pass the subsampled
+// files into the trimming and fastqc
+// Modify the pair name to indicate subsampled files. This way it will carry through the remainder of the anlysis.
+// if not subsample, then create channel directly from the raw sequencing files
+// */
 if (params.subsample){
     ch_subsample = Channel.fromFilePairs("${params.raw_reads_dir}/*R{1,2}*.fastq.gz")
     // ch_ref_genome = Channel.fromPath(params.ref_assembly_path)
@@ -189,7 +239,7 @@ process nextgenmap_mapping{
 	tuple val(pair_id), file(paired), file(unpaired) from ch_ngm_paired.join(ch_ngm_unpaired)
 
     output:
-    tuple val(pair_id), file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam"), file("${pair_id}_allreads_mapped.sam") into ch_mark_duplicates
+    tuple val(pair_id), file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam"), file("${pair_id}_allreads_mapped.sam") into add_read_group_headers_ch
 
     script:
     """
@@ -200,25 +250,44 @@ process nextgenmap_mapping{
     """
 }
 
-// TODO possibly remove the all_reads. I'm not sure if we'll need this.
-// containerOptions '-u $(id -u):$(id -g)'
-process markduplicates_spark{
+// TODO here we need to add the readgroup headers
+process add_read_group_headers{
     tag "${pair_id}"
     container 'broadinstitute/gatk:latest'
-    
-    cpus params.markduplicates_cpus
+    maxForks 1
 
     input:
-    tuple val(pair_id), file(paired), file(unpaired_fwd), file(unpaired_rev), file(all_reads) from ch_mark_duplicates
+    tuple val(pair_id), file(paired), file(unpaired_one), file(unpaired_two), file(all_reads) from add_read_group_headers_ch
 
     output:
-    tuple val(pair_id), file("${pair_id}.paired.deduplicated.sorted.bam"), file("${pair_id}.unpaired_fwd.deduplicated.sorted.bam"), file("${pair_id}.unpaired_rev.deduplicated.sorted.bam")
-    tuple file("${pair_id}.paired.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired_fwd.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired_rev.deduplicated.sorted.metrics.txt")
+    tuple val(pair_id), file("${pair_id}.paired.mapped.headers.sam"), file("${pair_id}.unpaired.1.mapped.headers.sam"), file("${pair_id}.unpaired.2.mapped.headers.sam") into mark_duplicates_ch
 
     script:
     """
-    gatk MarkDuplicatesSpark --remove-sequencing-duplicates --conf 'spark.executor.cores=${task.cpus}' -I ${paired} -O ${pair_id}.paired.deduplicated.sorted.bam -M ${pair_id}.paired.deduplicated.sorted.metrics.txt
-    gatk MarkDuplicatesSpark --remove-sequencing-duplicates --conf 'spark.executor.cores=${task.cpus}' -I ${unpaired_fwd} -O ${pair_id}.unpaired_fwd.deduplicated.sorted.bam -M ${pair_id}.unpaired_fwd.deduplicated.sorted.metrics.txt
-    gatk MarkDuplicatesSpark --remove-sequencing-duplicates --conf 'spark.executor.cores=${task.cpus}' -I ${unpaired_rev} -O ${pair_id}.unpaired_rev.deduplicated.sorted.bam -M ${pair_id}.unpaired_rev.deduplicated.sorted.metrics.txt
+    gatk AddOrReplaceReadGroups I=${paired} O=${pair_id}.paired.mapped.headers.sam ${read_group_map[(pair_id)]}
+    gatk AddOrReplaceReadGroups I=${unpaired_one} O=${pair_id}.unpaired.1.mapped.headers.sam ${read_group_map[(pair_id)]}
+    gatk AddOrReplaceReadGroups I=${unpaired_two} O=${pair_id}.unpaired.2.mapped.headers.sam ${read_group_map[(pair_id)]}
     """
 }
+
+// // TODO possibly remove the all_reads. I'm not sure if we'll need this.
+// // containerOptions '-u $(id -u):$(id -g)'
+// process markduplicates_spark{
+//     tag "${pair_id}"
+//     container 'broadinstitute/gatk:latest'
+//     cpus params.markduplicates_cpus
+
+//     input:
+//     tuple val(pair_id), file(paired), file(unpaired_fwd), file(unpaired_rev), file(all_reads) from mark_duplicates_ch
+
+//     output:
+//     tuple val(pair_id), file("${pair_id}.paired.deduplicated.sorted.bam"), file("${pair_id}.unpaired_fwd.deduplicated.sorted.bam"), file("${pair_id}.unpaired_rev.deduplicated.sorted.bam")
+//     tuple file("${pair_id}.paired.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired_fwd.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired_rev.deduplicated.sorted.metrics.txt")
+
+//     script:
+//     """
+//     gatk MarkDuplicatesSpark --remove-sequencing-duplicates --conf 'spark.executor.cores=${task.cpus}' -I ${paired} -O ${pair_id}.paired.deduplicated.sorted.bam -M ${pair_id}.paired.deduplicated.sorted.metrics.txt
+//     gatk MarkDuplicatesSpark --remove-sequencing-duplicates --conf 'spark.executor.cores=${task.cpus}' -I ${unpaired_fwd} -O ${pair_id}.unpaired_fwd.deduplicated.sorted.bam -M ${pair_id}.unpaired_fwd.deduplicated.sorted.metrics.txt
+//     gatk MarkDuplicatesSpark --remove-sequencing-duplicates --conf 'spark.executor.cores=${task.cpus}' -I ${unpaired_rev} -O ${pair_id}.unpaired_rev.deduplicated.sorted.bam -M ${pair_id}.unpaired_rev.deduplicated.sorted.metrics.txt
+//     """
+// }
