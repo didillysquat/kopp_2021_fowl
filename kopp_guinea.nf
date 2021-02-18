@@ -73,12 +73,14 @@ if (params.subsample){
     fastqc_post_trim_publish_dir = [params.output_dir, "fastqc_post_trim_sub_${params.subsample_depth}"].join(File.separator)
     pre_seq_c_curve_publish_dir = [params.output_dir, "pre_seq_c_curve_sub_${params.subsample_depth}"].join(File.separator)
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics_sub_${params.subsample_depth}"].join(File.separator)
+    pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient_sub_${params.subsample_depth}"].join(File.separator)
 }else{
     params.output_dir = "${workflow.launchDir}/outputs"
     fastqc_pre_trim_publish_dir = [params.output_dir, "fastqc_pre_trim"].join(File.separator)
     fastqc_post_trim_publish_dir = [params.output_dir, "fastqc_post_trim"].join(File.separator)
     pre_seq_c_curve_publish_dir = [params.output_dir, "pre_seq_c_curve"].join(File.separator)
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics"].join(File.separator)
+    pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient"].join(File.separator)
 }
 
 // CPUs
@@ -283,7 +285,7 @@ process markduplicates_spark{
     tuple val(pair_id), file(paired), file(unpaired_fwd), file(unpaired_rev) from mark_duplicates_ch
 
     output:
-    tuple val(pair_id), file("${pair_id}.paired.deduplicated.sorted.bam"), file("${pair_id}.unpaired.1.deduplicated.sorted.bam"), file("${pair_id}.unpaired.2.deduplicated.sorted.bam") into pre_seq_c_curve_ch,collect_gc_bias_metrics_ch
+    tuple val(pair_id), file("${pair_id}.paired.deduplicated.sorted.bam"), file("${pair_id}.unpaired.1.deduplicated.sorted.bam"), file("${pair_id}.unpaired.2.deduplicated.sorted.bam") into pre_seq_c_curve_ch,collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch
     tuple file("${pair_id}.paired.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired.1.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired.2.deduplicated.sorted.metrics.txt") into mark_duplicate_metrics_ch
 
     script:
@@ -338,4 +340,55 @@ process collect_gc_bias_metrics{
     gatk CollectGcBiasMetrics I=${unpaired_rev} O=${pair_id}.unpaired.2.GCBias.txt \
 	CHART=${pair_id}.unpaired.2.GCBias.pdf S=${pair_id}.unpaired.2.SumBias.txt R=${ref_genome}
     """
+}
+
+process pcr_bottleneck_coefficient{
+    tag pair_id
+    publishDir pcr_bottleneck_coefficient_publishDir, mode: 'copy'
+    container 'encodedcc/atac-seq-pipeline:PIP-1469_pbam_b92239a0-82a0-4297-b8b3-3a655a4626a8'
+
+    input:
+    tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from pcr_bottleneck_coefficient_ch
+    
+    output:
+    tuple path("${pair_id}.paired.allout.txt"), path("${pair_id}.pbc.paired.txt"), path("${pair_id}.unpaired.allout.txt"), path("${pair_id}.pbc.unpaired.txt") into pcr_bottleneck_coefficient_out_ch
+
+    shell:
+    '''
+    bedtools bamtobed -bedpe -i !{paired} | awk 'BEGIN{{OFS="\\t"}}{{print $1, $2, $4, $6, $9, $10}}' | grep -v "^{}\\s" | sort | uniq -c  | \
+    awk 'BEGIN{{mt=0;m0=0;m1=0;m2=0}} ($1==1) {{m1=m1+1}} ($1==2) {{m2=m2+1}} {{m0=m0+1}} {{mt=mt+$1}} END{{m1_m2=-1.0;
+    if (m2>0) m1_m2=m1/m2;
+    m0_mt=0;
+    if (mt>0) m0_mt=m0/mt;
+    m1_m0=0;
+    if (m0>0) m1_m0=m1/m0;
+    printf "%d %d %d %d %f %f %f\\n",mt,m0,m1,m2,m0_mt,m1_m0,m1_m2}}\' > l.txt;
+    cat l.txt >> !{pair_id}.paired.allout.txt;
+    awk '{print $5}' l.txt > a.txt;
+    cat a.txt >> !{pair_id}.pbc.paired.txt;
+
+    bedtools bamtobed -i !{unpaired_fwd} | awk 'BEGIN{{OFS="\\t"}}{{print $1, $2, $3, $6}}' | grep -v "^{}\\s" | sort | uniq -c  | \
+    awk 'BEGIN{{mt=0;m0=0;m1=0;m2=0}} ($1==1) {{m1=m1+1}} ($1==2) {{m2=m2+1}} {{m0=m0+1}} {{mt=mt+$1}} END{{m1_m2=-1.0;
+    if (m2>0) m1_m2=m1/m2;
+    m0_mt=0;
+    if (mt>0) m0_mt=m0/mt;
+    m1_m0=0;
+    if (m0>0) m1_m0=m1/m0;
+    printf "%d %d %d %d %f %f %f\\n",mt,m0,m1,m2,m0_mt,m1_m0,m1_m2}}\' > l.txt;
+    cat l.txt >> !{pair_id}.unpaired.allout.txt;
+    awk '{print $5}' l.txt > a.txt;
+    cat a.txt >> !{pair_id}.pbc.unpaired.txt;
+
+    bedtools bamtobed -i !{unpaired_rev} | awk 'BEGIN{{OFS="\\t"}}{{print $1, $2, $3, $6}}' | grep -v "^{}\\s" | sort | uniq -c  | \
+    awk 'BEGIN{{mt=0;m0=0;m1=0;m2=0}} ($1==1) {{m1=m1+1}} ($1==2) {{m2=m2+1}} {{m0=m0+1}} {{mt=mt+$1}} END{{m1_m2=-1.0;
+    if (m2>0) m1_m2=m1/m2;
+    m0_mt=0;
+    if (mt>0) m0_mt=m0/mt;
+    m1_m0=0;
+    if (m0>0) m1_m0=m1/m0;
+    printf "%d %d %d %d %f %f %f\\n",mt,m0,m1,m2,m0_mt,m1_m0,m1_m2}}\' > l.txt;
+    cat l.txt >> !{pair_id}.unpaired.allout.txt;
+    awk '{print $5}' l.txt > a.txt;
+    cat a.txt >> !{pair_id}.pbc.unpaired.txt;
+    '''
 }
