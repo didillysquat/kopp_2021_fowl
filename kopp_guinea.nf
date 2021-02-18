@@ -13,15 +13,16 @@ tru_seq_pe_fasta_path = "${workflow.launchDir}/TruSeq3-PE.fa"
 params.subsample = true
 params.subsample_depth = 10000
 
-// TODO make a dictionary that maps the pair_id to the readgroup info we will need to add readgroups using
-// picard AddOrReplaceReadGroups
-// This will return a map with key that is the pair_id (taking into account whether we are subsampling
-// and therefore have a modified paid_id) and the value is the string that will be passed to the actual
-// picard AddOrReplaceReadGroups command e.g. RGID=xxx RGLB=lib1 RGPL=ILLUMINA RGPU=unit1 RGSM=xxx
+// We originally made a map to use in the processes but this ran into 
+// multiprocessing conflict issues and made the dictionary unusable unless running
+// with maxforks set to 1.
+// To be more nextflow, we will make a list of tuplets with pair ID to readgroup string.
+// Then we will do a join operation using the pair_id as the keymake 
+// exmple string: RGID=xxx RGLB=lib1 RGPL=ILLUMINA RGPU=unit1 RGSM=xxx
 // NB it is critical to convert the key for a map to a string using .toString() if using e.g. "${my_var}"
 read_group_map = { 
     String[] file_lists = params.path_to_read_group_lists.split(",");
-    def emptyMap = [:]
+    def tup_list = []
     file_lists.eachWithIndex{ file_list, i -> 
             // i will be the RGID value
             // j will be the RGSM value
@@ -47,7 +48,7 @@ read_group_map = {
                         if (!pair_id_list.contains(pair_id)){
                             pair_id_list << pair_id
                             j++
-                            emptyMap.put("${pair_id}".toString(), "RGID=${i+1} RGLB=lib1 RGPL=ILLUMINA RGPU=unit1 RGSM=${j}")
+                            tup_list << ["${pair_id}".toString(), "RGID=${i+1} RGLB=lib1 RGPL=ILLUMINA RGPU=unit1 RGSM=${j}"]
                         }                            
                     }else{
                         throw new Exception("An error has occured when making the readgroup dictionary\nNo match was found for ${file_name}")
@@ -56,7 +57,7 @@ read_group_map = {
             }
         }
     }
-    return emptyMap     
+    return tup_list     
 }()
 
 
@@ -250,23 +251,23 @@ process nextgenmap_mapping{
     """
 }
 
+
 // TODO here we need to add the readgroup headers
 process add_read_group_headers{
     tag "${pair_id}"
     container 'broadinstitute/gatk:latest'
-    maxForks 1
 
     input:
-    tuple val(pair_id), file(paired), file(unpaired_one), file(unpaired_two), file(all_reads) from add_read_group_headers_ch
+    tuple val(pair_id), file(paired), file(unpaired_one), file(unpaired_two), file(all_reads), val(read_group_string) from add_read_group_headers_ch.join(Channel.fromList(read_group_map))
 
     output:
     tuple val(pair_id), file("${pair_id}.paired.mapped.headers.sam"), file("${pair_id}.unpaired.1.mapped.headers.sam"), file("${pair_id}.unpaired.2.mapped.headers.sam") into mark_duplicates_ch
 
     script:
     """
-    gatk AddOrReplaceReadGroups I=${paired} O=${pair_id}.paired.mapped.headers.sam ${read_group_map[(pair_id)]}
-    gatk AddOrReplaceReadGroups I=${unpaired_one} O=${pair_id}.unpaired.1.mapped.headers.sam ${read_group_map[(pair_id)]}
-    gatk AddOrReplaceReadGroups I=${unpaired_two} O=${pair_id}.unpaired.2.mapped.headers.sam ${read_group_map[(pair_id)]}
+    gatk AddOrReplaceReadGroups I=${paired} O=${pair_id}.paired.mapped.headers.sam ${read_group_string}
+    gatk AddOrReplaceReadGroups I=${unpaired_one} O=${pair_id}.unpaired.1.mapped.headers.sam ${read_group_string}
+    gatk AddOrReplaceReadGroups I=${unpaired_two} O=${pair_id}.unpaired.2.mapped.headers.sam ${read_group_string}
     """
 }
 
