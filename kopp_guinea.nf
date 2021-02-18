@@ -71,10 +71,14 @@ if (params.subsample){
     params.output_dir = "${workflow.launchDir}/outputs_sub_sampled/"
     fastqc_pre_trim_publish_dir = [params.output_dir, "fastqc_pre_trim_sub_${params.subsample_depth}"].join(File.separator)
     fastqc_post_trim_publish_dir = [params.output_dir, "fastqc_post_trim_sub_${params.subsample_depth}"].join(File.separator)
+    pre_seq_c_curve_publish_dir = [params.output_dir, "pre_seq_c_curve_sub_${params.subsample_depth}"].join(File.separator)
+    collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics_sub_${params.subsample_depth}"].join(File.separator)
 }else{
     params.output_dir = "${workflow.launchDir}/outputs"
     fastqc_pre_trim_publish_dir = [params.output_dir, "fastqc_pre_trim"].join(File.separator)
     fastqc_post_trim_publish_dir = [params.output_dir, "fastqc_post_trim"].join(File.separator)
+    pre_seq_c_curve_publish_dir = [params.output_dir, "pre_seq_c_curve"].join(File.separator)
+    collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics"].join(File.separator)
 }
 
 // CPUs
@@ -252,7 +256,7 @@ process nextgenmap_mapping{
 }
 
 
-// TODO here we need to add the readgroup headers
+// NB we have dropped the all reads because it was creating errors in the addorreplace.
 process add_read_group_headers{
     tag "${pair_id}"
     container 'broadinstitute/gatk:latest'
@@ -271,24 +275,67 @@ process add_read_group_headers{
     """
 }
 
-// // TODO possibly remove the all_reads. I'm not sure if we'll need this.
-// // containerOptions '-u $(id -u):$(id -g)'
-// process markduplicates_spark{
-//     tag "${pair_id}"
-//     container 'broadinstitute/gatk:latest'
-//     cpus params.markduplicates_cpus
+process markduplicates_spark{
+    tag "${pair_id}"
+    container 'broadinstitute/gatk:latest'
 
-//     input:
-//     tuple val(pair_id), file(paired), file(unpaired_fwd), file(unpaired_rev), file(all_reads) from mark_duplicates_ch
+    input:
+    tuple val(pair_id), file(paired), file(unpaired_fwd), file(unpaired_rev) from mark_duplicates_ch
 
-//     output:
-//     tuple val(pair_id), file("${pair_id}.paired.deduplicated.sorted.bam"), file("${pair_id}.unpaired_fwd.deduplicated.sorted.bam"), file("${pair_id}.unpaired_rev.deduplicated.sorted.bam")
-//     tuple file("${pair_id}.paired.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired_fwd.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired_rev.deduplicated.sorted.metrics.txt")
+    output:
+    tuple val(pair_id), file("${pair_id}.paired.deduplicated.sorted.bam"), file("${pair_id}.unpaired.1.deduplicated.sorted.bam"), file("${pair_id}.unpaired.2.deduplicated.sorted.bam") into pre_seq_c_curve_ch,collect_gc_bias_metrics_ch
+    tuple file("${pair_id}.paired.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired.1.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired.2.deduplicated.sorted.metrics.txt") into mark_duplicate_metrics_ch
 
-//     script:
-//     """
-//     gatk MarkDuplicatesSpark --remove-sequencing-duplicates --conf 'spark.executor.cores=${task.cpus}' -I ${paired} -O ${pair_id}.paired.deduplicated.sorted.bam -M ${pair_id}.paired.deduplicated.sorted.metrics.txt
-//     gatk MarkDuplicatesSpark --remove-sequencing-duplicates --conf 'spark.executor.cores=${task.cpus}' -I ${unpaired_fwd} -O ${pair_id}.unpaired_fwd.deduplicated.sorted.bam -M ${pair_id}.unpaired_fwd.deduplicated.sorted.metrics.txt
-//     gatk MarkDuplicatesSpark --remove-sequencing-duplicates --conf 'spark.executor.cores=${task.cpus}' -I ${unpaired_rev} -O ${pair_id}.unpaired_rev.deduplicated.sorted.bam -M ${pair_id}.unpaired_rev.deduplicated.sorted.metrics.txt
-//     """
-// }
+    script:
+    """
+    gatk MarkDuplicatesSpark --remove-sequencing-duplicates -I ${paired} -O ${pair_id}.paired.deduplicated.sorted.bam -M ${pair_id}.paired.deduplicated.sorted.metrics.txt
+    gatk MarkDuplicatesSpark --remove-sequencing-duplicates -I ${unpaired_fwd} -O ${pair_id}.unpaired.1.deduplicated.sorted.bam -M ${pair_id}.unpaired.1.deduplicated.sorted.metrics.txt
+    gatk MarkDuplicatesSpark --remove-sequencing-duplicates -I ${unpaired_rev} -O ${pair_id}.unpaired.2.deduplicated.sorted.bam -M ${pair_id}.unpaired.2.deduplicated.sorted.metrics.txt
+    """
+}
+
+process pre_seq_c_curve{
+    tag "${pair_id}"
+    container 'stevetsa/preseq:2.0'
+    publishDir pre_seq_c_curve_publish_dir, mode: 'copy'
+
+    input:
+    tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from pre_seq_c_curve_ch
+
+    output:
+    tuple path("${pair_id}.paired.cc.txt"), path("${pair_id}.unpaired.1.cc.txt"), path("${pair_id}.unpaired.2.cc.txt") into pre_seq_c_curve_out_ch
+
+    script:
+    """
+    preseq c_curve -bam -pe ${paired} -o ${pair_id}.paired.cc.txt
+    preseq c_curve -bam ${unpaired_fwd} -o ${pair_id}.unpaired.1.cc.txt
+    preseq c_curve -bam ${unpaired_rev} -o ${pair_id}.unpaired.2.cc.txt
+    """
+}
+
+process collect_gc_bias_metrics{
+    tag pair_id
+    publishDir collect_gc_bias_metrics_publishDir, mode: 'copy'
+    container 'broadinstitute/gatk:latest'
+
+    input:
+    tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from collect_gc_bias_metrics_ch
+    path ref_genome from params.ref_assembly_path
+    
+    output:
+    tuple path("${pair_id}.paired.GCBias.txt"), path("${pair_id}.paired.GCBias.pdf"), path("${pair_id}.paired.SumBias.txt"), \
+    path("${pair_id}.unpaired.1.GCBias.txt"), path("${pair_id}.unpaired.1.GCBias.pdf"), path("${pair_id}.unpaired.1.SumBias.txt"), \
+    path("${pair_id}.unpaired.2.GCBias.txt"), path("${pair_id}.unpaired.2.GCBias.pdf"), path("${pair_id}.unpaired.2.SumBias.txt")
+
+    script:
+    """
+    gatk CollectGcBiasMetrics I=${paired} O=${pair_id}.paired.GCBias.txt \
+	CHART=${pair_id}.paired.GCBias.pdf S=${pair_id}.paired.SumBias.txt R=${ref_genome}
+    
+    gatk CollectGcBiasMetrics I=${unpaired_fwd} O=${pair_id}.unpaired.1.GCBias.txt \
+	CHART=${pair_id}.unpaired.1.GCBias.pdf S=${pair_id}.unpaired.1.SumBias.txt R=${ref_genome}
+    
+    gatk CollectGcBiasMetrics I=${unpaired_rev} O=${pair_id}.unpaired.2.GCBias.txt \
+	CHART=${pair_id}.unpaired.2.GCBias.pdf S=${pair_id}.unpaired.2.SumBias.txt R=${ref_genome}
+    """
+}
