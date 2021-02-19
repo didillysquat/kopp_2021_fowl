@@ -74,6 +74,7 @@ if (params.subsample){
     pre_seq_c_curve_publish_dir = [params.output_dir, "pre_seq_c_curve_sub_${params.subsample_depth}"].join(File.separator)
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics_sub_${params.subsample_depth}"].join(File.separator)
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient_sub_${params.subsample_depth}"].join(File.separator)
+    mpileup_sequencing_depth_publishDir = [params.output_dir, "mpileup_sequencing_depth_sub_${params.subsample_depth}"].join(File.separator)
 }else{
     params.output_dir = "${workflow.launchDir}/outputs"
     fastqc_pre_trim_publish_dir = [params.output_dir, "fastqc_pre_trim"].join(File.separator)
@@ -81,6 +82,7 @@ if (params.subsample){
     pre_seq_c_curve_publish_dir = [params.output_dir, "pre_seq_c_curve"].join(File.separator)
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics"].join(File.separator)
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient"].join(File.separator)
+    mpileup_sequencing_depth_publishDir = [params.output_dir, "mpileup_sequencing_depth"].join(File.separator)
 }
 
 // CPUs
@@ -285,7 +287,7 @@ process markduplicates_spark{
     tuple val(pair_id), file(paired), file(unpaired_fwd), file(unpaired_rev) from mark_duplicates_ch
 
     output:
-    tuple val(pair_id), file("${pair_id}.paired.deduplicated.sorted.bam"), file("${pair_id}.unpaired.1.deduplicated.sorted.bam"), file("${pair_id}.unpaired.2.deduplicated.sorted.bam") into pre_seq_c_curve_ch,collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch
+    tuple val(pair_id), file("${pair_id}.paired.deduplicated.sorted.bam"), file("${pair_id}.unpaired.1.deduplicated.sorted.bam"), file("${pair_id}.unpaired.2.deduplicated.sorted.bam") into pre_seq_c_curve_ch,collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mpileup_sequencing_depth_ch
     tuple file("${pair_id}.paired.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired.1.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired.2.deduplicated.sorted.metrics.txt") into mark_duplicate_metrics_ch
 
     script:
@@ -390,5 +392,35 @@ process pcr_bottleneck_coefficient{
     cat l.txt >> !{pair_id}.unpaired.allout.txt;
     awk '{print $5}' l.txt > a.txt;
     cat a.txt >> !{pair_id}.pbc.unpaired.txt;
+    '''
+}
+
+// containerOptions '-u $(id -u):$(id -g)'
+// NB we tried several other samtools docker images but they either gave permission errors or they didn't play
+// well with bash. Instead of fixing the permission error we are using the below docker that worked without
+// needing to add additional run time parameters.
+process mpileup_sequencing_depth{
+    tag pair_id
+    publishDir mpileup_sequencing_depth_publishDir, mode: 'copy'
+    container 'singlecellpipeline/samtools:v0.0.3'
+    
+    input:
+    tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from mpileup_sequencing_depth_ch
+    
+    output:
+    tuple path("${pair_id}.paired.coverage.txt"), path("${pair_id}.unpaired.1.coverage.txt"), path("${pair_id}.unpaired.2.coverage.txt") into mpileup_sequencing_depth_out_ch
+
+    shell:
+    '''
+    samtools mpileup -aa -Q 1 !{paired} | cut -f 1,2,4 | cat > aaaa.txt
+    awk '{sum+=$3; sumsq+=$3*$3} END { print "Average Coverage = ",sum/NR; print "Stdev = ",sqrt(sumsq/NR - (sum/NR)**2)}' aaaa.txt > !{pair_id}.paired.coverage.txt
+
+    samtools mpileup -aa -Q 1 !{unpaired_fwd} | cut -f 1,2,4 | cat > aaaa.txt
+    awk '{sum+=$3; sumsq+=$3*$3} END { print "Average Coverage = ",sum/NR; print "Stdev = ",sqrt(sumsq/NR - (sum/NR)**2)}' aaaa.txt > !{pair_id}.unpaired.1.coverage.txt
+
+    samtools mpileup -aa -Q 1 !{unpaired_rev} | cut -f 1,2,4 | cat > aaaa.txt
+    awk '{sum+=$3; sumsq+=$3*$3} END { print "Average Coverage = ",sum/NR; print "Stdev = ",sqrt(sumsq/NR - (sum/NR)**2)}' aaaa.txt > !{pair_id}.unpaired.2.coverage.txt
+    
+    rm aaaa.txt
     '''
 }
