@@ -287,14 +287,14 @@ process markduplicates_spark{
     tuple val(pair_id), file(paired), file(unpaired_fwd), file(unpaired_rev) from mark_duplicates_ch
 
     output:
-    tuple val(pair_id), file("${pair_id}.paired.deduplicated.sorted.bam"), file("${pair_id}.unpaired.1.deduplicated.sorted.bam"), file("${pair_id}.unpaired.2.deduplicated.sorted.bam") into pre_seq_c_curve_ch,collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mpileup_sequencing_depth_ch
+    tuple val(pair_id), file("${pair_id}.paired.deduplicated.sorted.bam{,.bai}"), file("${pair_id}.unpaired.1.deduplicated.sorted.bam{,.bai}"), file("${pair_id}.unpaired.2.deduplicated.sorted.bam{,.bai}") into pre_seq_c_curve_ch,collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mpileup_sequencing_depth_ch,gatk_haplotype_caller_gvcf_ch
     tuple file("${pair_id}.paired.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired.1.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired.2.deduplicated.sorted.metrics.txt") into mark_duplicate_metrics_ch
 
     script:
     """
-    gatk MarkDuplicatesSpark --remove-sequencing-duplicates -I ${paired} -O ${pair_id}.paired.deduplicated.sorted.bam -M ${pair_id}.paired.deduplicated.sorted.metrics.txt
-    gatk MarkDuplicatesSpark --remove-sequencing-duplicates -I ${unpaired_fwd} -O ${pair_id}.unpaired.1.deduplicated.sorted.bam -M ${pair_id}.unpaired.1.deduplicated.sorted.metrics.txt
-    gatk MarkDuplicatesSpark --remove-sequencing-duplicates -I ${unpaired_rev} -O ${pair_id}.unpaired.2.deduplicated.sorted.bam -M ${pair_id}.unpaired.2.deduplicated.sorted.metrics.txt
+    gatk MarkDuplicatesSpark --create-output-bam-index --remove-sequencing-duplicates -I ${paired} -O ${pair_id}.paired.deduplicated.sorted.bam -M ${pair_id}.paired.deduplicated.sorted.metrics.txt
+    gatk MarkDuplicatesSpark --create-output-bam-index --remove-sequencing-duplicates -I ${unpaired_fwd} -O ${pair_id}.unpaired.1.deduplicated.sorted.bam -M ${pair_id}.unpaired.1.deduplicated.sorted.metrics.txt
+    gatk MarkDuplicatesSpark --create-output-bam-index --remove-sequencing-duplicates -I ${unpaired_rev} -O ${pair_id}.unpaired.2.deduplicated.sorted.bam -M ${pair_id}.unpaired.2.deduplicated.sorted.metrics.txt
     """
 }
 
@@ -311,9 +311,9 @@ process pre_seq_c_curve{
 
     script:
     """
-    preseq c_curve -bam -pe ${paired} -o ${pair_id}.paired.cc.txt
-    preseq c_curve -bam ${unpaired_fwd} -o ${pair_id}.unpaired.1.cc.txt
-    preseq c_curve -bam ${unpaired_rev} -o ${pair_id}.unpaired.2.cc.txt
+    preseq c_curve -bam -pe ${paired[0]} -o ${pair_id}.paired.cc.txt
+    preseq c_curve -bam ${unpaired_fwd[0]} -o ${pair_id}.unpaired.1.cc.txt
+    preseq c_curve -bam ${unpaired_rev[0]} -o ${pair_id}.unpaired.2.cc.txt
     """
 }
 
@@ -333,13 +333,13 @@ process collect_gc_bias_metrics{
 
     script:
     """
-    gatk CollectGcBiasMetrics I=${paired} O=${pair_id}.paired.GCBias.txt \
+    gatk CollectGcBiasMetrics I=${paired[0]} O=${pair_id}.paired.GCBias.txt \
 	CHART=${pair_id}.paired.GCBias.pdf S=${pair_id}.paired.SumBias.txt R=${ref_genome}
     
-    gatk CollectGcBiasMetrics I=${unpaired_fwd} O=${pair_id}.unpaired.1.GCBias.txt \
+    gatk CollectGcBiasMetrics I=${unpaired_fwd[0]} O=${pair_id}.unpaired.1.GCBias.txt \
 	CHART=${pair_id}.unpaired.1.GCBias.pdf S=${pair_id}.unpaired.1.SumBias.txt R=${ref_genome}
     
-    gatk CollectGcBiasMetrics I=${unpaired_rev} O=${pair_id}.unpaired.2.GCBias.txt \
+    gatk CollectGcBiasMetrics I=${unpaired_rev[0]} O=${pair_id}.unpaired.2.GCBias.txt \
 	CHART=${pair_id}.unpaired.2.GCBias.pdf S=${pair_id}.unpaired.2.SumBias.txt R=${ref_genome}
     """
 }
@@ -357,7 +357,7 @@ process pcr_bottleneck_coefficient{
 
     shell:
     '''
-    bedtools bamtobed -bedpe -i !{paired} | awk 'BEGIN{{OFS="\\t"}}{{print $1, $2, $4, $6, $9, $10}}' | grep -v "^{}\\s" | sort | uniq -c  | \
+    bedtools bamtobed -bedpe -i !{paired[0]} | awk 'BEGIN{{OFS="\\t"}}{{print $1, $2, $4, $6, $9, $10}}' | grep -v "^{}\\s" | sort | uniq -c  | \
     awk 'BEGIN{{mt=0;m0=0;m1=0;m2=0}} ($1==1) {{m1=m1+1}} ($1==2) {{m2=m2+1}} {{m0=m0+1}} {{mt=mt+$1}} END{{m1_m2=-1.0;
     if (m2>0) m1_m2=m1/m2;
     m0_mt=0;
@@ -369,7 +369,7 @@ process pcr_bottleneck_coefficient{
     awk '{print $5}' l.txt > a.txt;
     cat a.txt >> !{pair_id}.pbc.paired.txt;
 
-    bedtools bamtobed -i !{unpaired_fwd} | awk 'BEGIN{{OFS="\\t"}}{{print $1, $2, $3, $6}}' | grep -v "^{}\\s" | sort | uniq -c  | \
+    bedtools bamtobed -i !{unpaired_fwd[0]} | awk 'BEGIN{{OFS="\\t"}}{{print $1, $2, $3, $6}}' | grep -v "^{}\\s" | sort | uniq -c  | \
     awk 'BEGIN{{mt=0;m0=0;m1=0;m2=0}} ($1==1) {{m1=m1+1}} ($1==2) {{m2=m2+1}} {{m0=m0+1}} {{mt=mt+$1}} END{{m1_m2=-1.0;
     if (m2>0) m1_m2=m1/m2;
     m0_mt=0;
@@ -381,7 +381,7 @@ process pcr_bottleneck_coefficient{
     awk '{print $5}' l.txt > a.txt;
     cat a.txt >> !{pair_id}.pbc.unpaired.txt;
 
-    bedtools bamtobed -i !{unpaired_rev} | awk 'BEGIN{{OFS="\\t"}}{{print $1, $2, $3, $6}}' | grep -v "^{}\\s" | sort | uniq -c  | \
+    bedtools bamtobed -i !{unpaired_rev[0]} | awk 'BEGIN{{OFS="\\t"}}{{print $1, $2, $3, $6}}' | grep -v "^{}\\s" | sort | uniq -c  | \
     awk 'BEGIN{{mt=0;m0=0;m1=0;m2=0}} ($1==1) {{m1=m1+1}} ($1==2) {{m2=m2+1}} {{m0=m0+1}} {{mt=mt+$1}} END{{m1_m2=-1.0;
     if (m2>0) m1_m2=m1/m2;
     m0_mt=0;
@@ -395,32 +395,78 @@ process pcr_bottleneck_coefficient{
     '''
 }
 
-// containerOptions '-u $(id -u):$(id -g)'
-// NB we tried several other samtools docker images but they either gave permission errors or they didn't play
-// well with bash. Instead of fixing the permission error we are using the below docker that worked without
-// needing to add additional run time parameters.
+// // containerOptions '-u $(id -u):$(id -g)'
+// // NB we tried several other samtools docker images but they either gave permission errors or they didn't play
+// // well with bash. Instead of fixing the permission error we are using the below docker that worked without
+// // needing to add additional run time parameters.
+// // TODO this is another option for the sequencing depth zlskidmore/mosdepth.
+// // Could be worth testing for speed as the below is extremely slow.
+// // TODO we will leave this out for the time being.
+// // process mpileup_sequencing_depth{
+// //     tag pair_id
+// //     publishDir mpileup_sequencing_depth_publishDir, mode: 'copy'
+// //     container 'singlecellpipeline/samtools:v0.0.3'
+    
+// //     input:
+// //     tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from mpileup_sequencing_depth_ch
+    
+// //     output:
+// //     tuple path("${pair_id}.paired.coverage.txt"), path("${pair_id}.unpaired.1.coverage.txt"), path("${pair_id}.unpaired.2.coverage.txt") into mpileup_sequencing_depth_out_ch
+
+// //     shell:
+// //     '''
+// //     samtools mpileup -aa -Q 1 !{paired} | cut -f 1,2,4 | cat > aaaa.txt
+// //     awk '{sum+=$3; sumsq+=$3^2} END { print "Average Coverage = ",sum/NR; print "Stdev = ",sqrt(sumsq/NR - (sum/NR)^2)}' aaaa.txt > !{pair_id}.paired.coverage.txt
+// //     touch paired_done
+// //     samtools mpileup -aa -Q 1 !{unpaired_fwd} | cut -f 1,2,4 | cat > aaaa.txt
+// //     awk '{sum+=$3; sumsq+=$3^2} END { print "Average Coverage = ",sum/NR; print "Stdev = ",sqrt(sumsq/NR - (sum/NR)^2)}' aaaa.txt > !{pair_id}.unpaired.1.coverage.txt
+// //     touch unpaired.1_done
+// //     samtools mpileup -aa -Q 1 !{unpaired_rev} | cut -f 1,2,4 | cat > aaaa.txt
+// //     awk '{sum+=$3; sumsq+=$3^2} END { print "Average Coverage = ",sum/NR; print "Stdev = ",sqrt(sumsq/NR - (sum/NR)^2)}' aaaa.txt > !{pair_id}.unpaired.2.coverage.txt
+// //     touch unpaired.2_done
+// //     rm aaaa.txt
+// //     rm *done
+// //     '''
+// // }
+
+// // -n = dont output per-base depth. skipping this output will speed execution
+// // -x = dont look at internal cigar operations or correct mate overlaps (recommended for most use-cases)
 process mpileup_sequencing_depth{
     tag pair_id
     publishDir mpileup_sequencing_depth_publishDir, mode: 'copy'
-    container 'singlecellpipeline/samtools:v0.0.3'
+    container 'davelabhub/mosdepth:0.2.5--hb763d49_0'
     
     input:
     tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from mpileup_sequencing_depth_ch
     
     output:
-    tuple path("${pair_id}.paired.coverage.txt"), path("${pair_id}.unpaired.1.coverage.txt"), path("${pair_id}.unpaired.2.coverage.txt") into mpileup_sequencing_depth_out_ch
+    path("${pair_id}.paired.mosdepth.global.dist.txt") into mpileup_sequencing_depth_out_ch
 
-    shell:
-    '''
-    samtools mpileup -aa -Q 1 !{paired} | cut -f 1,2,4 | cat > aaaa.txt
-    awk '{sum+=$3; sumsq+=$3*$3} END { print "Average Coverage = ",sum/NR; print "Stdev = ",sqrt(sumsq/NR - (sum/NR)**2)}' aaaa.txt > !{pair_id}.paired.coverage.txt
-
-    samtools mpileup -aa -Q 1 !{unpaired_fwd} | cut -f 1,2,4 | cat > aaaa.txt
-    awk '{sum+=$3; sumsq+=$3*$3} END { print "Average Coverage = ",sum/NR; print "Stdev = ",sqrt(sumsq/NR - (sum/NR)**2)}' aaaa.txt > !{pair_id}.unpaired.1.coverage.txt
-
-    samtools mpileup -aa -Q 1 !{unpaired_rev} | cut -f 1,2,4 | cat > aaaa.txt
-    awk '{sum+=$3; sumsq+=$3*$3} END { print "Average Coverage = ",sum/NR; print "Stdev = ",sqrt(sumsq/NR - (sum/NR)**2)}' aaaa.txt > !{pair_id}.unpaired.2.coverage.txt
-    
-    rm aaaa.txt
-    '''
+    script:
+    """
+    mosdepth -nx ${pair_id}.paired ${paired[0]}
+    mosdepth -nx ${pair_id}.paired ${paired[0]}
+    mosdepth -nx ${pair_id}.paired ${paired[0]}
+    """
 }
+//TODO put the python script for processing these into bin and use it to plot.
+
+// // TODO it is unclear if we move fowards with the unpaired files or not.
+// process gatk_haplotype_caller_gvcf{
+//     tag pair_id
+//     container 'broadinstitute/gatk:latest'
+
+//     input:
+//     tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from gatk_haplotype_caller_gvcf_ch
+
+//     output:
+//     tuple val(pair_id), path("${pair_id}.paired.g.vcf.gz -ERC GVCF"), path("${pair_id}.unpaired.1.g.vcf.gz"), path("${pair_id}.unpaired.2.g.vcf.gz")
+//     path ref_genome from params.ref_assembly_path
+
+//     script
+//     """
+//     gatk HaplotypeCaller -R ${ref_genome} -I ${paired} -O ${pair_id}.paired.g.vcf.gz -ERC GVCF;
+//     gatk HaplotypeCaller -R ${ref_genome} -I ${unpaired_fwd} -O ${pair_id}.unpaired.1.g.vcf.gz -ERC GVCF;
+//     gatk HaplotypeCaller -R ${ref_genome} -I ${unpaired_rev} -O ${pair_id}.unpaired.2.g.vcf.gz -ERC GVCF;
+//     """
+// }
