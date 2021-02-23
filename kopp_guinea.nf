@@ -441,7 +441,7 @@ process mosdepth_sequencing_coverage{
     tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from mosdepth_sequencing_coverage_ch
     
     output:
-    tuple path("${pair_id}.paired.mosdepth.global.dist.txt"), path("${pair_id}.unpaired.1.mosdepth.global.dist.txt"), path("${pair_id}.unpaired.2.mosdepth.global.dist.txt") into mosdepth_sequencing_coverage_out_ch
+    tuple val(pair_id), path("${pair_id}.paired.mosdepth.global.dist.txt"), path("${pair_id}.unpaired.1.mosdepth.global.dist.txt"), path("${pair_id}.unpaired.2.mosdepth.global.dist.txt") into mosdepth_sequencing_coverage_out_ch
 
     script:
     """
@@ -450,6 +450,27 @@ process mosdepth_sequencing_coverage{
     mosdepth -nx ${pair_id}.unpaired.2 ${unpaired_rev[0]}
     """
 }
+
+process mosdepth_plot_seq_coverage{
+    tag pair_id
+    publishDir mosdepth_sequencing_coverage_publishDir, mode: 'copy'
+    conda "${envs_dir}/python3.yaml"
+
+    input:
+    tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from mosdepth_sequencing_coverage_out_ch
+
+    output:
+    tuple path("${pair_id}.paired.mostdepth.html"), path("${pair_id}.unpaired.1.mostdepth.html"), path("${pair_id}.unpaired.2.mostdepth.html")
+
+    script:
+    """
+    python3 ${bin_dir}/plot-dist.py -o ${pair_id}.paired.mostdepth.html ${paired}
+    python3 ${bin_dir}/plot-dist.py -o ${pair_id}.unpaired.1.mostdepth.html ${unpaired_fwd}
+    python3 ${bin_dir}/plot-dist.py -o ${pair_id}.unpaired.2.mostdepth.html ${unpaired_rev}
+    """
+}
+
+
 //TODO put the python script for processing these into bin and use it to plot.
 
 // // TODO it is unclear if we move fowards with the unpaired files or not.
