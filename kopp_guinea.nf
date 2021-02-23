@@ -1,10 +1,16 @@
 #!/usr/bin/env nextflow
 
 params.raw_reads_dir = "/home/humebc/projects/20210125_kopp_guinea_fowl/raw_seq_files"
-params.ref_assembly_path = "/home/humebc/projects/20210125_kopp_guinea_fowl/nf_pipeline_kopp/nummel_ref_assembly/GCF_002078875.1_NumMel1.0_genomic.fna.gz"
+params.ref_assembly_path = "/home/humebc/projects/20210125_kopp_guinea_fowl/nf_pipeline_kopp/nummel_ref_assembly/GCF_002078875.1_NumMel1.0_genomic.fna"
+File ref_assembly_file = new File(params.ref_assembly_path);
+ref_assembly_dir = ref_assembly_file.getParent();
+println("THIS IS ref ass: ${ref_assembly_dir}")
+// Check that the ref genome is decompressed
+if (params.ref_assembly_path.endsWith(".bgz") || params.ref_assembly_path.endsWith(".gz") || params.ref_assembly_path.endsWith(".zip")){
+    throw new Exception("The reference assembly genome must be decompressed and in fasta format (.fna, .fa, .fasta). Currently the reference genome path is set to ${params.ref_assembly_path}")
+}
 
 params.path_to_read_group_lists = "/home/humebc/projects/20210125_kopp_guinea_fowl/raw_seq_files/file-list-run-1,/home/humebc/projects/20210125_kopp_guinea_fowl/raw_seq_files/file-list-run-2"
-
 
 bin_dir = "${workflow.launchDir}/bin"
 envs_dir = "${workflow.launchDir}/envs"
@@ -90,6 +96,7 @@ if (params.subsample){
 params.trimmomatic_threads = 50
 params.nextgenmap_threads = 40
 params.markduplicates_cpus = 20
+params.gatk_haplotype_caller_cpus = 5
 
 
 // /* 
@@ -470,25 +477,51 @@ process mosdepth_plot_seq_coverage{
     """
 }
 
+// TODO the copy can be changed to move at a later date.
+// NB something I've stubled across by accident.
+// If we use the ref_genome as the path to the ref genome, then the output is in the working dir of this
+// nextflow process. But if we use params.ref_assembly_path then the .fai and .dict are output in
+// the params.ref_asssembly_path directory. WHich is good for now but could cause complicaitons
+// once were on BINAC or some
+process index_dictionary_refgenome{
+    container 'broadinstitute/gatk:latest'
+    publishDir ref_assembly_dir, mode: 'copy', saveAs: {filename -> if(filename.toString().endsWith(".fai") || filename.toString().endsWith(".dict")){return "${filename}";}else{return null;}}
 
-//TODO put the python script for processing these into bin and use it to plot.
+    input:
+    path ref_genome from params.ref_assembly_path
+
+    output:
+    tuple path("*.dict"), path("*.fai") into index_dictionary_refgenome_out_ch
+    path ref_genome into gatk_index_ch
+
+    script:
+    """
+    gatk CreateSequenceDictionary -R ${ref_genome}
+    samtools faidx ${ref_genome}
+    """
+}
 
 // // TODO it is unclear if we move fowards with the unpaired files or not.
-// process gatk_haplotype_caller_gvcf{
-//     tag pair_id
-//     container 'broadinstitute/gatk:latest'
+// NB HaplotypCaller requires a .fai
+// https://gatk.broadinstitute.org/hc/en-us/articles/360035531652-FASTA-Reference-genome-format
+// gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${unpaired_fwd[0]} -O ${pair_id}.unpaired.1.g.vcf.gz -ERC GVCF;
+// gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${unpaired_rev[0]} -O ${pair_id}.unpaired.2.g.vcf.gz -ERC GVCF;
+process gatk_haplotype_caller_gvcf{
+    tag pair_id
+    container 'broadinstitute/gatk:latest'
+    cpus params.gatk_haplotype_caller_cpus
 
-//     input:
-//     tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from gatk_haplotype_caller_gvcf_ch
+    input:
+    tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from gatk_haplotype_caller_gvcf_ch
+    path ref_genome from gatk_index_ch
 
-//     output:
-//     tuple val(pair_id), path("${pair_id}.paired.g.vcf.gz -ERC GVCF"), path("${pair_id}.unpaired.1.g.vcf.gz"), path("${pair_id}.unpaired.2.g.vcf.gz")
-//     path ref_genome from params.ref_assembly_path
+    output:
+    tuple val(pair_id), path("${pair_id}.paired.g.vcf.gz{,.tbi}"), path("${pair_id}.unpaired.1.g.vcf.gz{,.tbi}"), path("${pair_id}.unpaired.2.g.vcf.gz{,.tbi}") into gatk_haplotype_caller_gvcf_out_ch
 
-//     script
-//     """
-//     gatk HaplotypeCaller -R ${ref_genome} -I ${paired} -O ${pair_id}.paired.g.vcf.gz -ERC GVCF;
-//     gatk HaplotypeCaller -R ${ref_genome} -I ${unpaired_fwd} -O ${pair_id}.unpaired.1.g.vcf.gz -ERC GVCF;
-//     gatk HaplotypeCaller -R ${ref_genome} -I ${unpaired_rev} -O ${pair_id}.unpaired.2.g.vcf.gz -ERC GVCF;
-//     """
-// }
+    script:
+    """
+    gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${paired[0]} -O ${pair_id}.paired.g.vcf.gz -ERC GVCF;
+    gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${unpaired_fwd[0]} -O ${pair_id}.unpaired.1.g.vcf.gz -ERC GVCF;
+    gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${unpaired_rev[0]} -O ${pair_id}.unpaired.2.g.vcf.gz -ERC GVCF;
+    """
+}
