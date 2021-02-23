@@ -7,6 +7,7 @@ params.path_to_read_group_lists = "/home/humebc/projects/20210125_kopp_guinea_fo
 
 
 bin_dir = "${workflow.launchDir}/bin"
+envs_dir = "${workflow.launchDir}/envs"
 launch_dir = "${workflow.launchDir}"
 tru_seq_pe_fasta_path = "${workflow.launchDir}/TruSeq3-PE.fa"
 
@@ -74,7 +75,7 @@ if (params.subsample){
     pre_seq_c_curve_publish_dir = [params.output_dir, "pre_seq_c_curve_sub_${params.subsample_depth}"].join(File.separator)
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics_sub_${params.subsample_depth}"].join(File.separator)
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient_sub_${params.subsample_depth}"].join(File.separator)
-    mpileup_sequencing_depth_publishDir = [params.output_dir, "mpileup_sequencing_depth_sub_${params.subsample_depth}"].join(File.separator)
+    mosdepth_sequencing_coverage_publishDir = [params.output_dir, "mosdepth_sequencing_coverage_sub_${params.subsample_depth}"].join(File.separator)
 }else{
     params.output_dir = "${workflow.launchDir}/outputs"
     fastqc_pre_trim_publish_dir = [params.output_dir, "fastqc_pre_trim"].join(File.separator)
@@ -82,7 +83,7 @@ if (params.subsample){
     pre_seq_c_curve_publish_dir = [params.output_dir, "pre_seq_c_curve"].join(File.separator)
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics"].join(File.separator)
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient"].join(File.separator)
-    mpileup_sequencing_depth_publishDir = [params.output_dir, "mpileup_sequencing_depth"].join(File.separator)
+    mosdepth_sequencing_coverage_publishDir = [params.output_dir, "mosdepth_sequencing_coverage"].join(File.separator)
 }
 
 // CPUs
@@ -287,7 +288,7 @@ process markduplicates_spark{
     tuple val(pair_id), file(paired), file(unpaired_fwd), file(unpaired_rev) from mark_duplicates_ch
 
     output:
-    tuple val(pair_id), file("${pair_id}.paired.deduplicated.sorted.bam{,.bai}"), file("${pair_id}.unpaired.1.deduplicated.sorted.bam{,.bai}"), file("${pair_id}.unpaired.2.deduplicated.sorted.bam{,.bai}") into pre_seq_c_curve_ch,collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mpileup_sequencing_depth_ch,gatk_haplotype_caller_gvcf_ch
+    tuple val(pair_id), file("${pair_id}.paired.deduplicated.sorted.bam{,.bai}"), file("${pair_id}.unpaired.1.deduplicated.sorted.bam{,.bai}"), file("${pair_id}.unpaired.2.deduplicated.sorted.bam{,.bai}") into pre_seq_c_curve_ch,collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mosdepth_sequencing_coverage_ch,gatk_haplotype_caller_gvcf_ch
     tuple file("${pair_id}.paired.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired.1.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired.2.deduplicated.sorted.metrics.txt") into mark_duplicate_metrics_ch
 
     script:
@@ -402,16 +403,16 @@ process pcr_bottleneck_coefficient{
 // // TODO this is another option for the sequencing depth zlskidmore/mosdepth.
 // // Could be worth testing for speed as the below is extremely slow.
 // // TODO we will leave this out for the time being.
-// // process mpileup_sequencing_depth{
+// // process mosdepth_sequencing_coverage{
 // //     tag pair_id
-// //     publishDir mpileup_sequencing_depth_publishDir, mode: 'copy'
+// //     publishDir mosdepth_sequencing_coverage_publishDir, mode: 'copy'
 // //     container 'singlecellpipeline/samtools:v0.0.3'
     
 // //     input:
-// //     tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from mpileup_sequencing_depth_ch
+// //     tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from mosdepth_sequencing_coverage_ch
     
 // //     output:
-// //     tuple path("${pair_id}.paired.coverage.txt"), path("${pair_id}.unpaired.1.coverage.txt"), path("${pair_id}.unpaired.2.coverage.txt") into mpileup_sequencing_depth_out_ch
+// //     tuple path("${pair_id}.paired.coverage.txt"), path("${pair_id}.unpaired.1.coverage.txt"), path("${pair_id}.unpaired.2.coverage.txt") into mosdepth_sequencing_coverage_out_ch
 
 // //     shell:
 // //     '''
@@ -431,22 +432,22 @@ process pcr_bottleneck_coefficient{
 
 // // -n = dont output per-base depth. skipping this output will speed execution
 // // -x = dont look at internal cigar operations or correct mate overlaps (recommended for most use-cases)
-process mpileup_sequencing_depth{
+process mosdepth_sequencing_coverage{
     tag pair_id
-    publishDir mpileup_sequencing_depth_publishDir, mode: 'copy'
+    publishDir mosdepth_sequencing_coverage_publishDir, mode: 'copy'
     container 'davelabhub/mosdepth:0.2.5--hb763d49_0'
     
     input:
-    tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from mpileup_sequencing_depth_ch
+    tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from mosdepth_sequencing_coverage_ch
     
     output:
-    path("${pair_id}.paired.mosdepth.global.dist.txt") into mpileup_sequencing_depth_out_ch
+    tuple path("${pair_id}.paired.mosdepth.global.dist.txt"), path("${pair_id}.unpaired.1.mosdepth.global.dist.txt"), path("${pair_id}.unpaired.2.mosdepth.global.dist.txt") into mosdepth_sequencing_coverage_out_ch
 
     script:
     """
     mosdepth -nx ${pair_id}.paired ${paired[0]}
-    mosdepth -nx ${pair_id}.paired ${paired[0]}
-    mosdepth -nx ${pair_id}.paired ${paired[0]}
+    mosdepth -nx ${pair_id}.unpaired.1 ${unpaired_fwd[0]}
+    mosdepth -nx ${pair_id}.unpaired.2 ${unpaired_rev[0]}
     """
 }
 //TODO put the python script for processing these into bin and use it to plot.
