@@ -19,7 +19,6 @@ tru_seq_pe_fasta_path = "${workflow.launchDir}/TruSeq3-PE.fa"
 
 params.subsample = true
 params.subsample_depth = 10000
-
 // We originally made a map to use in the processes but this ran into 
 // multiprocessing conflict issues and made the dictionary unusable unless running
 // with maxforks set to 1.
@@ -27,6 +26,18 @@ params.subsample_depth = 10000
 // Then we will do a join operation using the pair_id as the keymake 
 // exmple string: RGID=xxx RGLB=lib1 RGPL=ILLUMINA RGPU=unit1 RGSM=xxx
 // NB it is critical to convert the key for a map to a string using .toString() if using e.g. "${my_var}"
+
+scaffold_list = {  
+    def scaffolds = []
+    new File(params.ref_assembly_path).eachLine {
+        line -> 
+        if (line.startsWith(">")){scaffolds << line.split()[0][1..-1];}
+        }
+    return scaffolds
+}()
+
+Channel.fromList(scaffold_list).into{scaffold_list_ch; scaffold_list_gather_vcfs_ch}
+
 read_group_map = { 
     String[] file_lists = params.path_to_read_group_lists.split(",");
     def tup_list = []
@@ -67,12 +78,6 @@ read_group_map = {
     return tup_list     
 }()
 
-
-// def bob = "mpg_L16952-1_W1446_S28_sub_10000"
-// println(read_group_map["${bob}"])
-
-// println("This is 'mpg_L16952-1_W1446_S28_sub_10000': ${read_group_map[mpg_L16952-1_W1446_S28_sub_10000]}")
-
 // Publish dirs
 if (params.subsample){
     params.output_dir = "${workflow.launchDir}/outputs_sub_sampled/"
@@ -82,6 +87,7 @@ if (params.subsample){
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics_sub_${params.subsample_depth}"].join(File.separator)
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient_sub_${params.subsample_depth}"].join(File.separator)
     mosdepth_sequencing_coverage_publishDir = [params.output_dir, "mosdepth_sequencing_coverage_sub_${params.subsample_depth}"].join(File.separator)
+    genotype_GVCFs_publishDir = [params.output_dir, "genotype_GVCFs_sub_${params.subsample_depth}"].join(File.separator)
 }else{
     params.output_dir = "${workflow.launchDir}/outputs"
     fastqc_pre_trim_publish_dir = [params.output_dir, "fastqc_pre_trim"].join(File.separator)
@@ -90,6 +96,7 @@ if (params.subsample){
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics"].join(File.separator)
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient"].join(File.separator)
     mosdepth_sequencing_coverage_publishDir = [params.output_dir, "mosdepth_sequencing_coverage"].join(File.separator)
+    genotype_GVCFs_publishDir = [params.output_dir, "genotype_GVCFs"].join(File.separator)
 }
 
 // CPUs
@@ -243,9 +250,9 @@ process nextgenmap_indexing{
     """
 }
 
-// We don't use the genome variable that comes from the index_ch
-// This input is only there to ensure that the indexing has been performed before the mapping
-// TODO possibly remove the all_reads. I'm not sure if we'll need this.
+// // // We don't use the genome variable that comes from the index_ch
+// // // This input is only there to ensure that the indexing has been performed before the mapping
+// // // TODO possibly remove the all_reads. I'm not sure if we'll need this.
 process nextgenmap_mapping{
     tag "${pair_id}"
     conda 'envs/ngm.yaml'
@@ -516,7 +523,7 @@ process gatk_haplotype_caller_gvcf{
     path ref_genome from gatk_index_ch
 
     output:
-    tuple val(pair_id), path("${pair_id}.paired.g.vcf.gz{,.tbi}"), path("${pair_id}.unpaired.1.g.vcf.gz{,.tbi}"), path("${pair_id}.unpaired.2.g.vcf.gz{,.tbi}") into gatk_haplotype_caller_gvcf_out_ch
+    tuple val(pair_id), path("${pair_id}.paired.g.vcf.gz{,.tbi}"), path("${pair_id}.unpaired.1.g.vcf.gz{,.tbi}"), path("${pair_id}.unpaired.2.g.vcf.gz{,.tbi}") into genomics_db_import_ch
 
     script:
     """
@@ -525,3 +532,118 @@ process gatk_haplotype_caller_gvcf{
     gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${unpaired_rev[0]} -O ${pair_id}.unpaired.2.g.vcf.gz -ERC GVCF;
     """
 }
+
+
+// TODO the collection of .g.vscf.gz files get read into GenomicsDBImport either individually on the command line or
+// using a file that maps the sample name to the sequencing g.vcf file.
+// We will take the mapping file approach as I can't think of an elegant way to 
+// ${GATK} GenomicsDBImport --java-options "-Xmx24g -Xms24g -Djava.io.tmpdir=/tmp" \
+// 	${gvcf.collect { "-V $it " }.join()} \
+//     -L ${chr} \
+//     --batch-size 50 \
+//     --tmp-dir=/tmp \
+// 	--genomicsdb-workspace-path ${params.cohort}.${chr}
+// TODO Stragtegy:
+// We will try to do the variant calling on a per scaffold (chromosone) basis.
+// In theory, the scattering (as its called) should be beneficial to run time as it
+// allows a parallel implementation of the per sample variant consolidating, and the variant calling.
+// 1 - run GenomicsDBImport on a per scafhold basis
+// 2 - run GenotypeGVCFs on a per chromosome basis.
+// 3 - run the filtering of the vcfs on a per chromosome basis
+// 4 - finally run GatherVcfs to collect the per chromosome files into a single vcf.
+// At this point we will be back in line with Till's pipeline.
+process genomics_db_import{
+    tag "${scaffold}"
+    echo true
+    cpus 5
+    container 'broadinstitute/gatk:latest'
+
+    input:
+    each scaffold from scaffold_list_ch
+    path(gvcf) from genomics_db_import_ch.collect{it[1][0]}
+	
+	output:
+    tuple val(scaffold), file("genomicsdbi.out.${chr}") into genotype_GVCFs_ch
+	
+    script:
+	"""
+	gatk  GenomicsDBImport ${gvcf.collect { "-V $it " }.join()} --genomicsdb-workspace-path genomicsdbi.out.${chr} -L ${scaffold} --batch-size 50
+	"""
+}
+
+
+process GenotypeGVCFs{
+    container 'broadinstitute/gatk:latest'
+	cpus 5
+	tag "${scaffold}"
+
+	publishDir genotype_GVCFs_publishDir, mode: 'copy', pattern: '*.{vcf,idx}'
+
+    input:
+	tuple val(scaffold), file(workspace) from genotype_GVCFs_ch
+   	path genome from params.ref_assembly_path
+
+	output:
+    tuple val(scaffold), file("GenotypeGVCFs.out.${scaffold}.vcf"), file("GenotypeGVCFs.out.${scaffold}.vcf.idx") into hard_filter_ch
+
+    script:
+	"""
+    WORKSPACE=\$( basename ${workspace} )
+    gatk GenotypeGVCFs -R ${genome} -O GenotypeGVCFs.out.${scaffold}.vcf \
+    --only-output-calls-starting-in-intervals -V gendb://\$WORKSPACE -L ${scaffold}
+	"""
+}
+
+// SelectVariants is also available to us if we want to further remove the variants from the filtered files
+// N.B. These are the genotypes that have been called, and it is iterations of these that we will want to compare.
+// TODO have a look at the ApplyBQSR to see if we should be using the masked version of the vcf or the selected version.
+process hard_filter{
+	tag "scaffold"
+    container 'broadinstitute/gatk:latest'
+    cpus 5
+
+    input:
+	tuple val(scaffold), path(vcf), path(vcfidx) from hard_filter_ch
+
+	output:
+    file("${chr}.filtered.vcf") into vcf_gather_vcfs_ch
+    file("${params.cohort}.${chr}.filtered.vcf.idx") into vcf_idx_gather_vcfs_ch
+
+    script:
+	"""
+	gatk VariantFiltration \
+    -filter "Qual >= 100" --filter-name "Qual100" \
+    -filter "QD < 2.0" --filter-name "QD2" \
+    -filter "MQ < 35.0" --filter-name "MQ35" \
+    -filter "FS > 60.0" --filter-name "FS60" \
+    -filter "HaplotypeScore > 13.0" --filter-name "Haplo13" \
+    -filter "MQRankSum < -12.5" --filter-name "MQRankSum-12" \
+    -filter "ReadPosRankSum < -8.0" --filter-name "ReadPosRank-8" 
+    -V ${vcf} \
+    -O ${chr}.markfiltered.vcf
+	"""
+}
+
+// TODO consolidate
+// TODO we are going to have to write some code here to get the VCFs in scaffold order.
+// We are going to have to do that using the scaffold list.
+// We should first write some dummy code to check wether we can bring in the external list here.
+process gather_vcfs{
+	tag "GatherVcfs"
+    container 'broadinstitute/gatk:latest'
+
+    input:
+    val(scaffhold_list) from scaffold_list_gather_vcfs_ch.collect()
+    path(vcf) from vcf_gather_vcfs_ch.collect()
+	path(vcf_idx) from vcf_idx_gather_vcfs_ch.collect()
+
+	output:
+    tuple file("fowl.vcf"), file("fowl.vcf.idx") into gather_vcfs_out_ch
+
+    script:
+	"""
+	gatk GatherVcfs ${scaffhold_list.collect{ "--INPUT ${it}.markfiltered.vcf " }.join()} --OUTPUT fowl.vcf
+	"""
+}
+
+// TODO the consolidation is where we will want to check
