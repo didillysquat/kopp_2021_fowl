@@ -37,14 +37,15 @@ scaffold_list = {
 }()
 
 Channel.fromList(scaffold_list).into{scaffold_list_ch; scaffold_list_gather_vcfs_ch}
-
+// NB the sample number must be unique for all samples irrespective of read group.
 read_group_map = { 
     String[] file_lists = params.path_to_read_group_lists.split(",");
     def tup_list = []
+    def j = 0
     file_lists.eachWithIndex{ file_list, i -> 
             // i will be the RGID value
             // j will be the RGSM value
-        def j = 0
+        
         def pair_id_list = []
         new File(file_list).eachLine {  
             line ->
@@ -194,7 +195,6 @@ process trimmomatic{
 	output:
 	tuple val(pair_id), file("${pair_id}*{1,2}P.fq.gz") into ch_fastqc_post_trim_paired,ch_ngm_paired
     tuple val(pair_id), file("${pair_id}*{1,2}U.fq.gz") into ch_fastqc_post_trim_unpaired,ch_ngm_unpaired
-    // tuple val(pair_id), file("${pair_id}*{1,2}{U,P}fq.gz") into ch_fastqc_post_trim
 
 	script:
 	outbase = fastqs[0].getName().replaceAll('.fastq.gz', '.trimmed.fq.gz')
@@ -206,9 +206,7 @@ process trimmomatic{
 	"""
 }
 
-// ch_fastqc_post_trim_paired.join(ch_fastqc_post_trim_unpaired).view()
 
-// We will look specifically for the P1 P2 U1 and U2 files
 process fastqc_post_trim{
     tag "${pair_id}"
     container 'trinityrnaseq/trinityrnaseq:latest'
@@ -254,7 +252,6 @@ process nextgenmap_indexing{
 
 // // // We don't use the genome variable that comes from the index_ch
 // // // This input is only there to ensure that the indexing has been performed before the mapping
-// // // TODO possibly remove the all_reads. I'm not sure if we'll need this.
 process nextgenmap_mapping{
     tag "${pair_id}"
     conda 'envs/ngm.yaml'
@@ -265,26 +262,23 @@ process nextgenmap_mapping{
 	tuple val(pair_id), file(paired), file(unpaired) from ch_ngm_paired.join(ch_ngm_unpaired)
 
     output:
-    tuple val(pair_id), file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam"), file("${pair_id}_allreads_mapped.sam") into add_read_group_headers_ch
+    tuple val(pair_id), file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam") into add_read_group_headers_ch
 
     script:
     """
     ngm -t ${task.cpus} -r ${params.ref_assembly_path} -1 ${paired[0]} -2 ${paired[1]} -o ${pair_id}_P_mapped.sam;
     ngm -t ${task.cpus} -r ${params.ref_assembly_path} -q ${unpaired[0]} -o ${pair_id}_U1_mapped.sam;
     ngm -t ${task.cpus} -r ${params.ref_assembly_path} -q ${unpaired[1]} -o ${pair_id}_U2_mapped.sam;
-    cat *mapped.sam > ${pair_id}_allreads_mapped.sam
     """
 }
 
-// add_read_group_headers_ch.take(4).view()
 
-// TODO we want to see if we can successfully merge the paired and unpaired reads together using MergeSamFiles
 process merge_paired_and_unpaired{
     tag "${pair_id}"
     container 'broadinstitute/gatk:latest'
 
     input:
-    tuple val(pair_id), file(paired), file(unpaired_one), file(unpaired_two), file(all_reads) from add_read_group_headers_ch
+    tuple val(pair_id), file(paired), file(unpaired_one), file(unpaired_two) from add_read_group_headers_ch
 
     output:
     tuple val(pair_id), file("${pair_id}_all_reads_mapped.sam") into read_groups_all_ch
@@ -296,9 +290,6 @@ process merge_paired_and_unpaired{
 
 }
 
-// read_groups_all_ch.take(5).view()
-
-// // NB we have dropped the all reads because it was creating errors in the addorreplace.
 process add_read_group_headers{
     tag "${pair_id}"
     container 'broadinstitute/gatk:latest'
@@ -333,6 +324,8 @@ process markduplicates_spark{
     """
 }
 
+// TODO we will need to update all of the evaluative processes to work with only the merged reads rather
+// than running for each of the paired and two unpaired sets of reads per sample
 // process pre_seq_c_curve{
 //     tag "${pair_id}"
 //     container 'stevetsa/preseq:2.0'
@@ -569,16 +562,17 @@ process gatk_haplotype_caller_gvcf{
 // // The problem is that the .tbi is also being passed in to the command and it can't find the CHROM header in it obviously.
 // genomics_db_import_ch.take(2).collect{it[1]}.view()
 // genomics_db_import_tbi_ch.take(2).collect{it[1]}.view()
-// 
+// TODO we are having caching issue here we will investigate using a subset of the chromosomes
+
 process genomics_db_import{
     tag "${scaffold}"
     cpus 5
     container 'broadinstitute/gatk:latest'
 
     input:
-    each scaffold from scaffold_list_ch 
-    path(gvcf) from genomics_db_import_ch.take(2).collect{it[1]}
-    path(gvcf_tbi) from genomics_db_import_tbi_ch.take(2).collect{it[1]}
+    each scaffold from scaffold_list_ch
+    path(gvcf) from genomics_db_import_ch.collect{it[1]}
+    path(gvcf_tbi) from genomics_db_import_tbi_ch.collect{it[1]}
 	
 	output:
     tuple val(scaffold), file("genomicsdbi.out.${scaffold}") into genotype_GVCFs_ch
@@ -590,27 +584,27 @@ process genomics_db_import{
 }
 
 
-// // process GenotypeGVCFs{
-// //     container 'broadinstitute/gatk:latest'
-// // 	cpus 5
-// // 	tag "${scaffold}"
+process GenotypeGVCFs{
+    container 'broadinstitute/gatk:latest'
+	cpus 5
+	tag "${scaffold}"
 
-// // 	publishDir genotype_GVCFs_publishDir, mode: 'copy', pattern: '*.{vcf,idx}'
+	publishDir genotype_GVCFs_publishDir, mode: 'copy', pattern: '*.{vcf,idx}'
 
-// //     input:
-// // 	tuple val(scaffold), file(workspace) from genotype_GVCFs_ch
-// //    	path genome from params.ref_assembly_path
+    input:
+	tuple val(scaffold), file(workspace) from genotype_GVCFs_ch
+   	path genome from params.ref_assembly_path
 
-// // 	output:
-// //     tuple val(scaffold), file("GenotypeGVCFs.out.${scaffold}.vcf"), file("GenotypeGVCFs.out.${scaffold}.vcf.idx") into hard_filter_ch
+	output:
+    tuple val(scaffold), file("GenotypeGVCFs.out.${scaffold}.vcf"), file("GenotypeGVCFs.out.${scaffold}.vcf.idx") into hard_filter_ch
 
-// //     script:
-// // 	"""
-// //     WORKSPACE=\$( basename ${workspace} )
-// //     gatk GenotypeGVCFs -R ${genome} -O GenotypeGVCFs.out.${scaffold}.vcf \
-// //     --only-output-calls-starting-in-intervals -V gendb://\$WORKSPACE -L ${scaffold}
-// // 	"""
-// // }
+    script:
+	"""
+    WORKSPACE=\$( basename ${workspace} )
+    gatk GenotypeGVCFs -R ${genome} -O GenotypeGVCFs.out.${scaffold}.vcf \
+    --only-output-calls-starting-in-intervals -V gendb://\$WORKSPACE -L ${scaffold}
+	"""
+}
 
 // // SelectVariants is also available to us if we want to further remove the variants from the filtered files
 // // N.B. These are the genotypes that have been called, and it is iterations of these that we will want to compare.
