@@ -83,6 +83,7 @@ if (params.subsample){
     params.output_dir = "${workflow.launchDir}/outputs_sub_sampled/"
     fastqc_pre_trim_publish_dir = [params.output_dir, "fastqc_pre_trim_sub_${params.subsample_depth}"].join(File.separator)
     fastqc_post_trim_publish_dir = [params.output_dir, "fastqc_post_trim_sub_${params.subsample_depth}"].join(File.separator)
+    markduplicates_metrics_publishDir = [params.output_dir, "markduplicates_metrics_sub_${params.subsample_depth}"].join(File.separator)
     pre_seq_c_curve_publish_dir = [params.output_dir, "pre_seq_c_curve_sub_${params.subsample_depth}"].join(File.separator)
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics_sub_${params.subsample_depth}"].join(File.separator)
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient_sub_${params.subsample_depth}"].join(File.separator)
@@ -92,6 +93,7 @@ if (params.subsample){
     params.output_dir = "${workflow.launchDir}/outputs"
     fastqc_pre_trim_publish_dir = [params.output_dir, "fastqc_pre_trim"].join(File.separator)
     fastqc_post_trim_publish_dir = [params.output_dir, "fastqc_post_trim"].join(File.separator)
+    markduplicates_metrics_publishDir = [params.output_dir, "markduplicates_metrics"].join(File.separator)
     pre_seq_c_curve_publish_dir = [params.output_dir, "pre_seq_c_curve"].join(File.separator)
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics"].join(File.separator)
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient"].join(File.separator)
@@ -276,45 +278,60 @@ process nextgenmap_mapping{
 
 // add_read_group_headers_ch.take(4).view()
 
+// TODO we want to see if we can successfully merge the paired and unpaired reads together using MergeSamFiles
+process merge_paired_and_unpaired{
+    tag "${pair_id}"
+    container 'broadinstitute/gatk:latest'
 
+    input:
+    tuple val(pair_id), file(paired), file(unpaired_one), file(unpaired_two), file(all_reads) from add_read_group_headers_ch
+
+    output:
+    tuple val(pair_id), file("${pair_id}_all_reads_mapped.sam") into read_groups_all_ch
+
+    script:
+    """
+    gatk MergeSamFiles --INPUT $paired --INPUT $unpaired_one --INPUT $unpaired_one --OUTPUT ${pair_id}_all_reads_mapped.sam
+    """
+
+}
+
+// read_groups_all_ch.take(5).view()
 
 // // NB we have dropped the all reads because it was creating errors in the addorreplace.
-// process add_read_group_headers{
-//     tag "${pair_id}"
-//     container 'broadinstitute/gatk:latest'
+process add_read_group_headers{
+    tag "${pair_id}"
+    container 'broadinstitute/gatk:latest'
 
-//     input:
-//     tuple val(pair_id), file(paired), file(unpaired_one), file(unpaired_two), file(all_reads), val(read_group_string) from add_read_group_headers_ch.join(Channel.fromList(read_group_map))
+    input:
+    tuple val(pair_id), file(merged), val(read_group_string) from read_groups_all_ch.join(Channel.fromList(read_group_map))
 
-//     output:
-//     tuple val(pair_id), file("${pair_id}.paired.mapped.headers.sam"), file("${pair_id}.unpaired.1.mapped.headers.sam"), file("${pair_id}.unpaired.2.mapped.headers.sam") into mark_duplicates_ch
+    output:
+    tuple val(pair_id), file("${pair_id}.merged.mapped.headers.sam") into mark_duplicates_ch
 
-//     script:
-//     """
-//     gatk AddOrReplaceReadGroups I=${paired} O=${pair_id}.paired.mapped.headers.sam ${read_group_string}
-//     gatk AddOrReplaceReadGroups I=${unpaired_one} O=${pair_id}.unpaired.1.mapped.headers.sam ${read_group_string}
-//     gatk AddOrReplaceReadGroups I=${unpaired_two} O=${pair_id}.unpaired.2.mapped.headers.sam ${read_group_string}
-//     """
-// }
+    script:
+    """
+    gatk AddOrReplaceReadGroups I=${merged} O=${pair_id}.merged.mapped.headers.sam ${read_group_string}
+    """
+}
 
-// process markduplicates_spark{
-//     tag "${pair_id}"
-//     container 'broadinstitute/gatk:latest'
+process markduplicates_spark{
+    tag "${pair_id}"
+    container 'broadinstitute/gatk:latest'
+    publishDir markduplicates_metrics_publishDir, pattern: "*.metrics.txt"
 
-//     input:
-//     tuple val(pair_id), file(paired), file(unpaired_fwd), file(unpaired_rev) from mark_duplicates_ch
+    input:
+    tuple val(pair_id), file(merged) from mark_duplicates_ch
 
-//     output:
-//     tuple val(pair_id), file("${pair_id}.paired.deduplicated.sorted.bam{,.bai}"), file("${pair_id}.unpaired.1.deduplicated.sorted.bam{,.bai}"), file("${pair_id}.unpaired.2.deduplicated.sorted.bam{,.bai}") into pre_seq_c_curve_ch,collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mosdepth_sequencing_coverage_ch,gatk_haplotype_caller_gvcf_ch
-//     tuple file("${pair_id}.paired.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired.1.deduplicated.sorted.metrics.txt"), file("${pair_id}.unpaired.2.deduplicated.sorted.metrics.txt") into mark_duplicate_metrics_ch
+    output:
+    tuple val(pair_id), file("${pair_id}.merged.deduplicated.sorted.bam{,.bai}") into pre_seq_c_curve_ch,collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mosdepth_sequencing_coverage_ch,gatk_haplotype_caller_gvcf_ch
+    file("${pair_id}.merged.deduplicated.sorted.metrics.txt") into mark_duplicate_metrics_ch
 
-//     script:
-//     """
-//     gatk MarkDuplicatesSpark --create-output-bam-index --remove-sequencing-duplicates -I ${paired} -O ${pair_id}.paired.deduplicated.sorted.bam -M ${pair_id}.paired.deduplicated.sorted.metrics.txt
-//     gatk MarkDuplicatesSpark --create-output-bam-index --remove-sequencing-duplicates -I ${unpaired_fwd} -O ${pair_id}.unpaired.1.deduplicated.sorted.bam -M ${pair_id}.unpaired.1.deduplicated.sorted.metrics.txt
-//     gatk MarkDuplicatesSpark --create-output-bam-index --remove-sequencing-duplicates -I ${unpaired_rev} -O ${pair_id}.unpaired.2.deduplicated.sorted.bam -M ${pair_id}.unpaired.2.deduplicated.sorted.metrics.txt
-//     """
-// }
+    script:
+    """
+    gatk MarkDuplicatesSpark --create-output-bam-index --remove-sequencing-duplicates -I ${merged} -O ${pair_id}.merged.deduplicated.sorted.bam -M ${pair_id}.merged.deduplicated.sorted.metrics.txt
+    """
+}
 
 // process pre_seq_c_curve{
 //     tag "${pair_id}"
@@ -493,48 +510,47 @@ process nextgenmap_mapping{
 // // nextflow process. But if we use params.ref_assembly_path then the .fai and .dict are output in
 // // the params.ref_asssembly_path directory. WHich is good for now but could cause complicaitons
 // // once were on BINAC or some
-// process index_dictionary_refgenome{
-//     container 'broadinstitute/gatk:latest'
-//     publishDir ref_assembly_dir, mode: 'copy', saveAs: {filename -> if(filename.toString().endsWith(".fai") || filename.toString().endsWith(".dict")){return "${filename}";}else{return null;}}
+process index_dictionary_refgenome{
+    container 'broadinstitute/gatk:latest'
+    publishDir ref_assembly_dir, mode: 'copy', saveAs: {filename -> if(filename.toString().endsWith(".fai") || filename.toString().endsWith(".dict")){return "${filename}";}else{return null;}}
 
-//     input:
-//     path ref_genome from params.ref_assembly_path
+    input:
+    path ref_genome from params.ref_assembly_path
 
-//     output:
-//     tuple path("*.dict"), path("*.fai") into index_dictionary_refgenome_out_ch
-//     path ref_genome into gatk_index_ch
+    output:
+    tuple path("*.dict"), path("*.fai") into index_dictionary_refgenome_out_ch
+    path ref_genome into gatk_index_ch
 
-//     script:
-//     """
-//     gatk CreateSequenceDictionary -R ${ref_genome}
-//     samtools faidx ${ref_genome}
-//     """
-// }
+    script:
+    """
+    gatk CreateSequenceDictionary -R ${ref_genome}
+    samtools faidx ${ref_genome}
+    """
+}
 
 // // // TODO it is unclear if we move fowards with the unpaired files or not.
 // // NB HaplotypCaller requires a .fai
 // // https://gatk.broadinstitute.org/hc/en-us/articles/360035531652-FASTA-Reference-genome-format
 // // gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${unpaired_fwd[0]} -O ${pair_id}.unpaired.1.g.vcf.gz -ERC GVCF;
 // // gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${unpaired_rev[0]} -O ${pair_id}.unpaired.2.g.vcf.gz -ERC GVCF;
-// process gatk_haplotype_caller_gvcf{
-//     tag pair_id
-//     container 'broadinstitute/gatk:latest'
-//     cpus params.gatk_haplotype_caller_cpus
+process gatk_haplotype_caller_gvcf{
+    tag pair_id
+    container 'broadinstitute/gatk:latest'
+    cpus params.gatk_haplotype_caller_cpus
 
-//     input:
-//     tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from gatk_haplotype_caller_gvcf_ch
-//     path ref_genome from gatk_index_ch
+    input:
+    tuple val(pair_id), path(merged) from gatk_haplotype_caller_gvcf_ch
+    path ref_genome from gatk_index_ch
 
-//     output:
-//     tuple val(pair_id), path("${pair_id}.paired.g.vcf.gz{,.tbi}"), path("${pair_id}.unpaired.1.g.vcf.gz{,.tbi}"), path("${pair_id}.unpaired.2.g.vcf.gz{,.tbi}") into genomics_db_import_ch
+    output:
+    tuple val(pair_id), path("${pair_id}.merged.g.vcf.gz") into genomics_db_import_ch
+    tuple val(pair_id), path("${pair_id}.merged.g.vcf.gz.tbi") into genomics_db_import_tbi_ch
 
-//     script:
-//     """
-//     gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${paired[0]} -O ${pair_id}.paired.g.vcf.gz -ERC GVCF;
-//     gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${unpaired_fwd[0]} -O ${pair_id}.unpaired.1.g.vcf.gz -ERC GVCF;
-//     gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${unpaired_rev[0]} -O ${pair_id}.unpaired.2.g.vcf.gz -ERC GVCF;
-//     """
-// }
+    script:
+    """
+    gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
+    """
+}
 
 // // TODO Stragtegy:
 // // We will try to do the variant calling on a per scaffold (chromosone) basis.
@@ -551,24 +567,27 @@ process nextgenmap_mapping{
 // // each scaffold from scaffold_list_ch
 // // specific problem reported mpg_L16980-1_D4714_S56_sub_10000.paired.g.vcf.gz.tbi
 // // The problem is that the .tbi is also being passed in to the command and it can't find the CHROM header in it obviously.
-// process genomics_db_import{
-//     tag "${scaffold}"
-//     echo true
-//     cpus 5
-//     container 'broadinstitute/gatk:latest'
+// genomics_db_import_ch.take(2).collect{it[1]}.view()
+// genomics_db_import_tbi_ch.take(2).collect{it[1]}.view()
+// 
+process genomics_db_import{
+    tag "${scaffold}"
+    cpus 5
+    container 'broadinstitute/gatk:latest'
 
-//     input:
-    
-//     path(gvcf) from genomics_db_import_ch.take(2).collect{it[1]}
+    input:
+    each scaffold from scaffold_list_ch 
+    path(gvcf) from genomics_db_import_ch.take(2).collect{it[1]}
+    path(gvcf_tbi) from genomics_db_import_tbi_ch.take(2).collect{it[1]}
 	
-// 	output:
-//     tuple val(scaffold), file("genomicsdbi.out.${chr}") into genotype_GVCFs_ch
+	output:
+    tuple val(scaffold), file("genomicsdbi.out.${scaffold}") into genotype_GVCFs_ch
 	
-//     script:
-// 	"""
-// 	gatk  --java-options '-DGATK_STACKTRACE_ON_USER_EXCEPTION=true' GenomicsDBImport ${gvcf.collect { "-V $it " }.join()} --genomicsdb-workspace-path genomicsdbi.out.NC_034409.1 -L NC_034409.1 --batch-size 50
-// 	"""
-// }
+    script:
+	"""
+	gatk  --java-options '-DGATK_STACKTRACE_ON_USER_EXCEPTION=true' GenomicsDBImport ${gvcf.collect { "-V $it " }.join()} --genomicsdb-workspace-path genomicsdbi.out.${scaffold} -L $scaffold --batch-size 50
+	"""
+}
 
 
 // // process GenotypeGVCFs{
