@@ -96,6 +96,10 @@ if (params.subsample){
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient_sub_${params.subsample_depth}"].join(File.separator)
     mosdepth_sequencing_coverage_publishDir = [params.output_dir, "mosdepth_sequencing_coverage_sub_${params.subsample_depth}"].join(File.separator)
     genotype_GVCFs_publishDir = [params.output_dir, "genotype_GVCFs_sub_${params.subsample_depth}"].join(File.separator)
+    gatk_output_variants_publishDir = [params.output_dir, "gatk_output_variants_sub_${params.subsample_depth}"].join(File.separator)
+    vcf_stats_publishDir = [params.output_dir, "vcf_stats_sub_${params.subsample_depth}"].join(File.separator)
+    analyze_covariates_publishDir = [params.output_dir, "analyze_covariates_sub_${params.subsample_depth}"].join(File.separator)
+    
 }else{
     params.output_dir = "${workflow.launchDir}/outputs"
     fastqc_pre_trim_publish_dir = [params.output_dir, "fastqc_pre_trim"].join(File.separator)
@@ -106,6 +110,9 @@ if (params.subsample){
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient"].join(File.separator)
     mosdepth_sequencing_coverage_publishDir = [params.output_dir, "mosdepth_sequencing_coverage"].join(File.separator)
     genotype_GVCFs_publishDir = [params.output_dir, "genotype_GVCFs"].join(File.separator)
+    gatk_output_variants_publishDir = [params.output_dir, "gatk_output_variants"].join(File.separator)
+    vcf_stats_publishDir = [params.output_dir, "vcf_stats"].join(File.separator)
+    analyze_covariates_publishDir = [params.output_dir, "analyze_covariates"].join(File.separator)
 }
 
 // CPUs
@@ -606,6 +613,8 @@ process GenotypeGVCFs{
 
 	output:
     tuple val(scaffold), file("GenotypeGVCFs.out.${scaffold}.vcf"), file("GenotypeGVCFs.out.${scaffold}.vcf.idx") into hard_filter_ch
+    file("GenotypeGVCFs.out.${scaffold}.vcf") into gather_vcfs_for_eval_ch
+    file("GenotypeGVCFs.out.${scaffold}.vcf.idx") into gather_vcfs_idx_for_eval_ch
 
     script:
 	"""
@@ -615,8 +624,87 @@ process GenotypeGVCFs{
 	"""
 }
 
-// TODO we will likely want to include a gather vcf part here. These will be the variants that we want to check
-// versus the last iteration.
+// TODO do a gather vcf and run stats metrics on it. Use these metrics to compare to the prvious iteration.
+// Upon evaluation, if one more round of BQSR is required then we proceed below.
+// Else move forwards with move foward with the called variants.
+process gather_vcfs_for_eval{
+	tag "GatherVcfs_for_eval"
+    container 'broadinstitute/gatk:latest'
+    publishDir gatk_output_variants_publishDir
+
+    input:
+    val(scaffhold_list) from Channel.fromList(scaffold_list).collect()
+    path(vcf) from gather_vcfs_for_eval_ch.collect()
+	path(vcf_idx) from gather_vcfs_idx_for_eval_ch.collect()
+
+	output:
+    tuple path("fowl.eval.vcf"), path("fowl.eval.vcf.idx") into bcftools_stats_ch,rtg_vcfstats_ch
+
+    script:
+	"""
+	gatk GatherVcfs ${scaffhold_list.collect{ "--INPUT GenotypeGVCFs.out.${it}.vcf " }.join()} --OUTPUT fowl.eval.vcf
+	"""
+}
+
+// TODO let's try running the statistics with two different programs and see what we get out
+// https://genomics.sschmeier.com/ngs-variantcalling/index.html
+// rtg vcfstats
+// bcftools stats
+process bcftools_vcfstats{
+    tag "bcftools_stats"
+    container "halllab/bcftools:v1.9"
+    publishDir vcf_stats_publishDir
+
+    input:
+    tuple path(vcf), path(vcf_idx) from bcftools_stats_ch
+
+    output:
+    path("bcftools.stats.txt") into bcftools_stats_out_ch
+
+    script:
+    """
+    touch tester
+    bcftools stats -F ${params.ref_assembly_path} -s - $vcf > bcftools.stats.txt
+    """
+}
+
+
+// This produces a really handy per sample output but ideally we'd also like a summary metric
+// As such, we then pass the output of this process into another process to generate this output
+process rtg_vcfstats_per_sample{
+    tag "rtg_vcfstats"
+    container 'realtimegenomics/rtg-tools:latest'
+    publishDir vcf_stats_publishDir
+
+    input:
+    tuple path(vcf), path(vcf_idx) from rtg_vcfstats_ch
+
+    output:
+    path("rtg.stats.per_sample.txt") into rtg_vcfstats_out_ch
+
+    script:
+    """
+    rtg vcfstats $vcf > rtg.stats.per_sample.txt
+    """
+
+}
+
+process rtg_vcfstats_summary{
+    tag "rtg_vcfstats_summary"
+    container 'broadinstitute/gatk:latest'
+    publishDir vcf_stats_publishDir
+
+    input:
+    path(rtg_vcfstats_output) from rtg_vcfstats_out_ch
+
+    output:
+    path("rtg.stats.summary*.txt") into rtg_vcfstats_summary_out_ch
+
+    script:
+    """
+    python3 ${bin_dir}/summarise_rtg_vcfstats.py $rtg_vcfstats_output
+    """
+}
 
 // SelectVariants is also available to us if we want to further remove the variants from the filtered files
 // N.B. These are the genotypes that have been called, and it is iterations of these that we will want to compare.
@@ -655,6 +743,7 @@ process hard_filter{
 // TODO we are going to have to write some code here to get the VCFs in scaffold order.
 // We are going to have to do that using the scaffold list.
 // We should first write some dummy code to check wether we can bring in the external list here.
+// TODO probably best to add ".filtered" (and an iteration int) to the .vcf and .idx outputs from this process.
 process gather_vcfs{
 	tag "GatherVcfs"
     container 'broadinstitute/gatk:latest'
@@ -665,7 +754,7 @@ process gather_vcfs{
 	path(vcf_idx) from vcf_idx_gather_vcfs_ch.collect()
 
 	output:
-    tuple path("fowl.vcf"), path("fowl.vcf.idx") into make_bqsr_tables_known_variants_ch
+    tuple path("fowl.vcf"), path("fowl.vcf.idx") into make_bqsr_tables_known_variants_ch,make_bqsr_tables_known_variants_round_2_ch
 
     script:
 	"""
@@ -688,6 +777,7 @@ process make_bqsr_tables{
 
     output:
     tuple val(pair_id), path(merged_bam), path("${pair_id}.table") into apply_bqsr_tables_ch
+    tuple val(pair_id), path("${pair_id}.table") into compare_tables_round_1_ch
 
     script:
     """
@@ -704,12 +794,56 @@ process apply_bqsr_tables{
     tuple val(pair_id), path(merged_bam), path(table) from apply_bqsr_tables_ch
 
     output:
-    tuple val(pair_id), path("${pair_id}.recalibrated.bam{,.bai}") into apply_bqsr_tables_out_ch
+    tuple val(pair_id), path("${pair_id}.recalibrated.bam{,.bai}") into apply_bqsr_tables_out_ch,apply_bqsr_tables_round_2_ch
 
     script:
     """
     gatk ApplyBQSR -R ${params.ref_assembly_path} -I ${merged_bam[0]} \
     --bqsr-recal-file $table \
     -O ${pair_id}.recalibrated.bam;
+    """
+}
+
+// TODO attempt to get a graphical output of the effect of performing the BQSR
+// TODO this we will perform another BaseRecalibrator on the recalibrated BAM and then run
+// AnalyzeCovariates to get a graphical output of the change.
+// https://github.com/broadinstitute/gatk/issues/322
+
+process make_bqsr_tables_round_2{
+    tag {pair_id}
+    container 'broadinstitute/gatk:latest'
+
+    input:
+    tuple val(pair_id), path(merged_bam), path(known_variants), path(known_variants_idx) from apply_bqsr_tables_round_2_ch.combine(make_bqsr_tables_known_variants_round_2_ch)
+
+    output:
+    tuple val(pair_id), path("${pair_id}.after.table") into compare_tables_round_2_ch
+
+    script:
+    """
+    gatk BaseRecalibrator -I ${merged_bam[0]} -R ${params.ref_assembly_path} \
+    --known-sites $known_variants -O ${pair_id}.after.table
+    """
+
+}
+
+process AnalyzeCovariates{
+    tag {pair_id}
+    container 'broadinstitute/gatk:latest'
+    publishDir analyze_covariates_publishDir
+
+    input:
+    tuple val(pair_id), path(table_before), path(table_after) from compare_tables_round_1_ch.join(compare_tables_round_2_ch)
+
+    output:
+    tuple val(pair_id), path("${pair_id}.BQSR.csv"), path("${pair_id}.BQSR.pdf") into compare_tables_round_2_out_ch
+    
+    script:
+    """
+    gatk AnalyzeCovariates \
+      -before $table_before \
+      -after $table_after \
+      -csv ${pair_id}.BQSR.csv \
+      -plots ${pair_id}.BQSR.pdf
     """
 }
