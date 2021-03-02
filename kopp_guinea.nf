@@ -669,46 +669,49 @@ process gather_vcfs{
 
     script:
 	"""
-	gatk GatherVcfs ${scaffhold_list.collect{ "--INPUT ${it}.markfiltered.vcf " }.join()} --OUTPUT fowl.vcf
+	gatk GatherVcfs ${scaffhold_list.collect{ "--INPUT ${it}.filtered.vcf " }.join()} --OUTPUT fowl.vcf
 	"""
 }
 
 // We will want to do this on a per sample basis
 // We will want to use the fowl.vcf and the fowl.vcf.idx multiple times withhout using them up
 // It may be that we have to output these files as values rather than path/files in the gather_vcf process.
-process make_bqsr_tables{
-    tag {pair_id}
-    container 'broadinstitute/gatk:latest'
+// process make_bqsr_tables{
+//     tag {pair_id}
+//     container 'broadinstitute/gatk:latest'
 
-    input:
-    tuple val(pair_id), path(merged_bam) from make_bqsr_tables_bam_ch
-    tuple val(known_variants), val(known_variants_idx) from make_bqsr_tables_known_variants_ch
+//     input:
+//     tuple val(pair_id), path(merged_bam) from make_bqsr_tables_bam_ch
+//     tuple val(known_variants), val(known_variants_idx) from make_bqsr_tables_known_variants_ch
 
-    output:
-    tuple val(pair_id), path(merged_bam), path("${pair_id}.table") into apply_bqsr_tables_ch
+//     output:
+//     tuple val(pair_id), path(merged_bam), path("${pair_id}.table") into apply_bqsr_tables_ch
 
-    script:
-    """
-    gatk BaseRecalibrator $merged_bam -R ${params.ref_assembly_path} \
-    --known-sites known_variants\
-    -O /beegfs/work/kn_pop503546_oldhome/bamRecal1/${base}.table;
-    """
+//     script:
+//     """
+//     gatk BaseRecalibrator $merged_bam -R ${params.ref_assembly_path} \
+//     --known-sites k$nown_variants \
+//     -O ${pair_id}.table
+//     """
 
+// }
 
-}
+// process apply_bqsr_tables{
+//     tag {pair_id}
+//     container 'broadinstitute/gatk:latest'
 
-process apply_bqsr_tables{
-    tag {pair_id}
-    container 'broadinstitute/gatk:latest'
+//     input:
+//     tuple val(pair_id), path(merged_bam), path(table) from apply_bqsr_tables_ch
 
-    input:
-    tuple val(pair_id), path(table), path(bam) from make_bqsr_tables_bam_ch.join()
+//     output:
+//     tuple val(pair_id), path("${pair_id}.recalibrated.bam") into apply_bqsr_tables_out_ch
 
-    output:
-    tuple val(pair_id), path("${pair_id}.table") into apply_bqsr_tables_ch
-
-    script:
-    """
-
-    """
-}
+//     script:
+//     """
+//     gatk ApplyBQSR \
+//     -R ${params.ref_assembly_path} \
+//     -I $merged_bam \
+//     --bqsr-recal-file $table \
+//     -O ${pair_id}.recalibrated.bam;
+//     """
+// }
