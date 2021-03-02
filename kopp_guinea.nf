@@ -321,7 +321,7 @@ process markduplicates_spark{
     tuple val(pair_id), file(merged) from mark_duplicates_ch
 
     output:
-    tuple val(pair_id), file("${pair_id}.merged.deduplicated.sorted.bam{,.bai}") into pre_seq_c_curve_ch,collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mosdepth_sequencing_coverage_ch,gatk_haplotype_caller_gvcf_ch
+    tuple val(pair_id), file("${pair_id}.merged.deduplicated.sorted.bam{,.bai}") into pre_seq_c_curve_ch,collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mosdepth_sequencing_coverage_ch,gatk_haplotype_caller_gvcf_ch,make_bqsr_tables_bam_ch
     file("${pair_id}.merged.deduplicated.sorted.metrics.txt") into mark_duplicate_metrics_ch
 
     script:
@@ -589,7 +589,8 @@ process genomics_db_import{
 	"""
 }
 
-
+// TODO an alternative to passing int he ref_genome_fai and ref_genome_dict (has a typo in the code)
+// Is to pass the param to the actual path
 process GenotypeGVCFs{
     container 'broadinstitute/gatk:latest'
 	cpus 5
@@ -614,56 +615,100 @@ process GenotypeGVCFs{
 	"""
 }
 
-// // SelectVariants is also available to us if we want to further remove the variants from the filtered files
-// // N.B. These are the genotypes that have been called, and it is iterations of these that we will want to compare.
-// // TODO have a look at the ApplyBQSR to see if we should be using the masked version of the vcf or the selected version.
-// // process hard_filter{
-// // 	tag "scaffold"
-// //     container 'broadinstitute/gatk:latest'
-// //     cpus 5
+// TODO we will likely want to include a gather vcf part here. These will be the variants that we want to check
+// versus the last iteration.
 
-// //     input:
-// // 	tuple val(scaffold), path(vcf), path(vcfidx) from hard_filter_ch
+// SelectVariants is also available to us if we want to further remove the variants from the filtered files
+// N.B. These are the genotypes that have been called, and it is iterations of these that we will want to compare.
+// TODO have a look at the ApplyBQSR to see if we should be using the masked version of the vcf or the selected version.
+process hard_filter{
+	tag {scaffold}
+    container 'broadinstitute/gatk:latest'
+    cpus 5
 
-// // 	output:
-// //     file("${chr}.filtered.vcf") into vcf_gather_vcfs_ch
-// //     file("${params.cohort}.${chr}.filtered.vcf.idx") into vcf_idx_gather_vcfs_ch
+    input:
+	tuple val(scaffold), path(vcf), path(vcfidx) from hard_filter_ch
 
-// //     script:
-// // 	"""
-// // 	gatk VariantFiltration \
-// //     -filter "Qual >= 100" --filter-name "Qual100" \
-// //     -filter "QD < 2.0" --filter-name "QD2" \
-// //     -filter "MQ < 35.0" --filter-name "MQ35" \
-// //     -filter "FS > 60.0" --filter-name "FS60" \
-// //     -filter "HaplotypeScore > 13.0" --filter-name "Haplo13" \
-// //     -filter "MQRankSum < -12.5" --filter-name "MQRankSum-12" \
-// //     -filter "ReadPosRankSum < -8.0" --filter-name "ReadPosRank-8" 
-// //     -V ${vcf} \
-// //     -O ${chr}.markfiltered.vcf
-// // 	"""
-// // }
+	output:
+    file("${scaffold}.filtered.vcf") into vcf_gather_vcfs_ch
+    file("${scaffold}.filtered.vcf.idx") into vcf_idx_gather_vcfs_ch
 
-// // TODO consolidate
-// // TODO we are going to have to write some code here to get the VCFs in scaffold order.
-// // We are going to have to do that using the scaffold list.
-// // We should first write some dummy code to check wether we can bring in the external list here.
-// // process gather_vcfs{
-// // 	tag "GatherVcfs"
-// //     container 'broadinstitute/gatk:latest'
+    script:
+	"""
+	gatk VariantFiltration \
+    -filter "Qual >= 100" --filter-name "Qual100" \
+    -filter "QD < 2.0" --filter-name "QD2" \
+    -filter "MQ < 35.0" --filter-name "MQ35" \
+    -filter "FS > 60.0" --filter-name "FS60" \
+    -filter "HaplotypeScore > 13.0" --filter-name "Haplo13" \
+    -filter "MQRankSum < -12.5" --filter-name "MQRankSum-12" \
+    -filter "ReadPosRankSum < -8.0" --filter-name "ReadPosRank-8" \
+    -V ${vcf} -O ${scaffold}.markfiltered.vcf
 
-// //     input:
-// //     val(scaffhold_list) from scaffold_list_gather_vcfs_ch.collect()
-// //     path(vcf) from vcf_gather_vcfs_ch.collect()
-// // 	path(vcf_idx) from vcf_idx_gather_vcfs_ch.collect()
+    gatk SelectVariants --exclude-filtered \
+      -V ${scaffold}.markfiltered.vcf \
+      -O ${scaffold}.filtered.vcf
+	"""
+}
 
-// // 	output:
-// //     tuple file("fowl.vcf"), file("fowl.vcf.idx") into gather_vcfs_out_ch
+// TODO consolidate
+// TODO we are going to have to write some code here to get the VCFs in scaffold order.
+// We are going to have to do that using the scaffold list.
+// We should first write some dummy code to check wether we can bring in the external list here.
+process gather_vcfs{
+	tag "GatherVcfs"
+    container 'broadinstitute/gatk:latest'
 
-// //     script:
-// // 	"""
-// // 	gatk GatherVcfs ${scaffhold_list.collect{ "--INPUT ${it}.markfiltered.vcf " }.join()} --OUTPUT fowl.vcf
-// // 	"""
-// // }
+    input:
+    val(scaffhold_list) from scaffold_list_gather_vcfs_ch.collect()
+    path(vcf) from vcf_gather_vcfs_ch.collect()
+	path(vcf_idx) from vcf_idx_gather_vcfs_ch.collect()
 
-// // TODO the consolidation is where we will want to check
+	output:
+    tuple val("fowl.vcf"), val("fowl.vcf.idx") into make_bqsr_tables_known_variants_ch
+
+    script:
+	"""
+	gatk GatherVcfs ${scaffhold_list.collect{ "--INPUT ${it}.markfiltered.vcf " }.join()} --OUTPUT fowl.vcf
+	"""
+}
+
+// We will want to do this on a per sample basis
+// We will want to use the fowl.vcf and the fowl.vcf.idx multiple times withhout using them up
+// It may be that we have to output these files as values rather than path/files in the gather_vcf process.
+process make_bqsr_tables{
+    tag {pair_id}
+    container 'broadinstitute/gatk:latest'
+
+    input:
+    tuple val(pair_id), path(merged_bam) from make_bqsr_tables_bam_ch
+    tuple val(known_variants), val(known_variants_idx) from make_bqsr_tables_known_variants_ch
+
+    output:
+    tuple val(pair_id), path(merged_bam), path("${pair_id}.table") into apply_bqsr_tables_ch
+
+    script:
+    """
+    gatk BaseRecalibrator $merged_bam -R ${params.ref_assembly_path} \
+    --known-sites known_variants\
+    -O /beegfs/work/kn_pop503546_oldhome/bamRecal1/${base}.table;
+    """
+
+
+}
+
+process apply_bqsr_tables{
+    tag {pair_id}
+    container 'broadinstitute/gatk:latest'
+
+    input:
+    tuple val(pair_id), path(table), path(bam) from make_bqsr_tables_bam_ch.join()
+
+    output:
+    tuple val(pair_id), path("${pair_id}.table") into apply_bqsr_tables_ch
+
+    script:
+    """
+
+    """
+}
