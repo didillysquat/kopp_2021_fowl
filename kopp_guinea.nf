@@ -2,6 +2,12 @@
 
 params.raw_reads_dir = "/home/humebc/projects/20210125_kopp_guinea_fowl/raw_seq_files"
 params.ref_assembly_path = "/home/humebc/projects/20210125_kopp_guinea_fowl/nf_pipeline_kopp/nummel_ref_assembly/GCF_002078875.1_NumMel1.0_genomic.fna"
+// NB both the .fai file and the .dict file are created in the process index_dictionary_refgenome
+// We pass them into the process GenotypeGVCFs as values created directly from these variables so that they can
+// be reused rather than pass in the output files from the index_dictionary_refgenome which may cause them to be used up in
+// a single process (we have not tested whether this is true but it most likely is).
+ref_assembly_fai_path = params.ref_assembly_path+".fai"
+ref_assembly_dict_path = params.ref_assembly_path.replaceAll(".fna", ".dict")
 File ref_assembly_file = new File(params.ref_assembly_path);
 ref_assembly_dir = ref_assembly_file.getParent();
 println("THIS IS ref ass: ${ref_assembly_dir}")
@@ -544,7 +550,7 @@ process gatk_haplotype_caller_gvcf{
     gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
     """
 }
-
+// https://github.com/IARCbioinfo/gatk4-GenotypeGVCFs-nf/blob/master/gatk4-GenotypeGVCFs.nf
 // // TODO Stragtegy:
 // // We will try to do the variant calling on a per scaffold (chromosone) basis.
 // // In theory, the scattering (as its called) should be beneficial to run time as it
@@ -594,6 +600,8 @@ process GenotypeGVCFs{
     input:
 	tuple val(scaffold), file(workspace) from genotype_GVCFs_ch
    	path genome from params.ref_assembly_path
+    path ref_genome_fai from ref_assembly_fai_path
+    path reg_genome_dict from ref_assembly_dict_path
 
 	output:
     tuple val(scaffold), file("GenotypeGVCFs.out.${scaffold}.vcf"), file("GenotypeGVCFs.out.${scaffold}.vcf.idx") into hard_filter_ch
