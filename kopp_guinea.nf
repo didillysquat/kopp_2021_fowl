@@ -10,7 +10,7 @@ ref_assembly_fai_path = params.ref_assembly_path+".fai"
 ref_assembly_dict_path = params.ref_assembly_path.replaceAll(".fna", ".dict")
 File ref_assembly_file = new File(params.ref_assembly_path);
 ref_assembly_dir = ref_assembly_file.getParent();
-println("THIS IS ref ass: ${ref_assembly_dir}")
+
 // Check that the ref genome is decompressed
 if (params.ref_assembly_path.endsWith(".bgz") || params.ref_assembly_path.endsWith(".gz") || params.ref_assembly_path.endsWith(".zip")){
     throw new Exception("The reference assembly genome must be decompressed and in fasta format (.fna, .fa, .fasta). Currently the reference genome path is set to ${params.ref_assembly_path}")
@@ -121,13 +121,13 @@ params.nextgenmap_threads = 40
 params.markduplicates_cpus = 20
 params.gatk_haplotype_caller_cpus = 5
 
-
-// /* 
-// If subsample, create a channel that will pass into the subsampling process and then pass the subsampled
-// files into the trimming and fastqc
-// Modify the pair name to indicate subsampled files. This way it will carry through the remainder of the anlysis.
-// if not subsample, then create channel directly from the raw sequencing files
-// */
+// START OF PRE PROCESSING
+/* 
+If subsample, create a channel that will pass into the subsampling process and then pass the subsampled
+files into the trimming and fastqc
+Modify the pair name to indicate subsampled files. This way it will carry through the remainder of the anlysis.
+if not subsample, then create channel directly from the raw sequencing files
+*/
 if (params.subsample){
     ch_subsample = Channel.fromFilePairs("${params.raw_reads_dir}/*R{1,2}*.fastq.gz")
     // ch_ref_genome = Channel.fromPath(params.ref_assembly_path)
@@ -161,7 +161,6 @@ if (params.subsample){
     // ch_ref_genome_name = Channel.value(params.ref_assembly_path)
 }
 
-
 process fastqc_pre_trim{
     tag "${pair_id}"
     container 'trinityrnaseq/trinityrnaseq:latest'
@@ -182,20 +181,6 @@ process fastqc_pre_trim{
     """
 }
 
-
-/* 
-    Trim reads with trimmomatic
-*/
-/*  Call used by Till:
-        trimmomatic PE -threads 8 \ 
-		${infile} ${base}R2_001.fastq.gz \
-                ${base}R1_001_paired.fastq.gz ${base}R1_001_unpaired.fastq.gz \
-                ${base}R2_001_paired.fastq.gz ${base}R2_001_unpaired.fastq.gz \
-                SLIDINGWINDOW:4:20 MINLEN:70 LEADING:10 HEADCROP:5 TRAILING:10 \
-		-summary ${base}trimSum.txt
-*/
-// TODO check to see if we need to have a higher HEADCROP than Till used.
-// We need to pick up the paired and unpaired reads
 process trimmomatic{
     cache 'lenient'
 	tag "${pair_id}"
@@ -336,514 +321,405 @@ process markduplicates_spark{
     gatk MarkDuplicatesSpark --create-output-bam-index --remove-sequencing-duplicates -I ${merged} -O ${pair_id}.merged.deduplicated.sorted.bam -M ${pair_id}.merged.deduplicated.sorted.metrics.txt
     """
 }
+// END OF PRE PROCESSING
 
-// TODO we will need to update all of the evaluative processes to work with only the merged reads rather
-// than running for each of the paired and two unpaired sets of reads per sample
-// process pre_seq_c_curve{
-//     tag "${pair_id}"
-//     container 'stevetsa/preseq:2.0'
-//     publishDir pre_seq_c_curve_publish_dir, mode: 'copy'
+// START OF EVALUATION METRICS
+process collect_gc_bias_metrics{
+    tag pair_id
+    publishDir collect_gc_bias_metrics_publishDir, mode: 'copy'
+    container 'broadinstitute/gatk:latest'
 
-//     input:
-//     tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from pre_seq_c_curve_ch
-
-//     output:
-//     tuple path("${pair_id}.paired.cc.txt"), path("${pair_id}.unpaired.1.cc.txt"), path("${pair_id}.unpaired.2.cc.txt") into pre_seq_c_curve_out_ch
-
-//     script:
-//     """
-//     preseq c_curve -bam -pe ${paired[0]} -o ${pair_id}.paired.cc.txt
-//     preseq c_curve -bam ${unpaired_fwd[0]} -o ${pair_id}.unpaired.1.cc.txt
-//     preseq c_curve -bam ${unpaired_rev[0]} -o ${pair_id}.unpaired.2.cc.txt
-//     """
-// }
-
-// process collect_gc_bias_metrics{
-//     tag pair_id
-//     publishDir collect_gc_bias_metrics_publishDir, mode: 'copy'
-//     container 'broadinstitute/gatk:latest'
-
-//     input:
-//     tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from collect_gc_bias_metrics_ch
-//     path ref_genome from params.ref_assembly_path
+    input:
+    tuple val(pair_id), path(merged) from collect_gc_bias_metrics_ch
+    path ref_genome from params.ref_assembly_path
     
-//     output:
-//     tuple path("${pair_id}.paired.GCBias.txt"), path("${pair_id}.paired.GCBias.pdf"), path("${pair_id}.paired.SumBias.txt"), \
-//     path("${pair_id}.unpaired.1.GCBias.txt"), path("${pair_id}.unpaired.1.GCBias.pdf"), path("${pair_id}.unpaired.1.SumBias.txt"), \
-//     path("${pair_id}.unpaired.2.GCBias.txt"), path("${pair_id}.unpaired.2.GCBias.pdf"), path("${pair_id}.unpaired.2.SumBias.txt")
+    output:
+    tuple path("${pair_id}.merged.GCBias.txt"), path("${pair_id}.merged.GCBias.pdf"), path("${pair_id}.merged.SumBias.txt")
 
-//     script:
-//     """
-//     gatk CollectGcBiasMetrics I=${paired[0]} O=${pair_id}.paired.GCBias.txt \
-// 	CHART=${pair_id}.paired.GCBias.pdf S=${pair_id}.paired.SumBias.txt R=${ref_genome}
+    script:
+    """
+    gatk CollectGcBiasMetrics I=${merged[0]} O=${pair_id}.merged.GCBias.txt \
+	CHART=${pair_id}.merged.GCBias.pdf S=${pair_id}.merged.SumBias.txt R=${ref_genome}
+    """
+}
+
+
+process pcr_bottleneck_coefficient{
+    tag pair_id
+    publishDir pcr_bottleneck_coefficient_publishDir, mode: 'copy'
+    container 'encodedcc/atac-seq-pipeline:PIP-1469_pbam_b92239a0-82a0-4297-b8b3-3a655a4626a8'
+
+    input:
+    tuple val(pair_id), path(merged) from pcr_bottleneck_coefficient_ch
     
-//     gatk CollectGcBiasMetrics I=${unpaired_fwd[0]} O=${pair_id}.unpaired.1.GCBias.txt \
-// 	CHART=${pair_id}.unpaired.1.GCBias.pdf S=${pair_id}.unpaired.1.SumBias.txt R=${ref_genome}
+    output:
+    tuple path("${pair_id}.merged.allout.txt"), path("${pair_id}.pbc.merged.txt") into pcr_bottleneck_coefficient_out_ch
+
+    shell:
+    '''
+    bedtools bamtobed -bedpe -i !{merged[0]} | awk 'BEGIN{{OFS="\\t"}}{{print $1, $2, $4, $6, $9, $10}}' | grep -v "^{}\\s" | sort | uniq -c  | \
+    awk 'BEGIN{{mt=0;m0=0;m1=0;m2=0}} ($1==1) {{m1=m1+1}} ($1==2) {{m2=m2+1}} {{m0=m0+1}} {{mt=mt+$1}} END{{m1_m2=-1.0;
+    if (m2>0) m1_m2=m1/m2;
+    m0_mt=0;
+    if (mt>0) m0_mt=m0/mt;
+    m1_m0=0;
+    if (m0>0) m1_m0=m1/m0;
+    printf "%d %d %d %d %f %f %f\\n",mt,m0,m1,m2,m0_mt,m1_m0,m1_m2}}\' > l.txt;
+    cat l.txt >> !{pair_id}.merged.allout.txt;
+    awk '{print $5}' l.txt > a.txt;
+    cat a.txt >> !{pair_id}.pbc.merged.txt;
+    '''
+}
+
+// -n = dont output per-base depth. skipping this output will speed execution
+// -x = dont look at internal cigar operations or correct mate overlaps (recommended for most use-cases)
+process mosdepth_sequencing_coverage{
+    tag pair_id
+    publishDir mosdepth_sequencing_coverage_publishDir, mode: 'copy'
+    container 'davelabhub/mosdepth:0.2.5--hb763d49_0'
     
-//     gatk CollectGcBiasMetrics I=${unpaired_rev[0]} O=${pair_id}.unpaired.2.GCBias.txt \
-// 	CHART=${pair_id}.unpaired.2.GCBias.pdf S=${pair_id}.unpaired.2.SumBias.txt R=${ref_genome}
-//     """
-// }
-
-// process pcr_bottleneck_coefficient{
-//     tag pair_id
-//     publishDir pcr_bottleneck_coefficient_publishDir, mode: 'copy'
-//     container 'encodedcc/atac-seq-pipeline:PIP-1469_pbam_b92239a0-82a0-4297-b8b3-3a655a4626a8'
-
-//     input:
-//     tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from pcr_bottleneck_coefficient_ch
+    input:
+    tuple val(pair_id), path(merged) from mosdepth_sequencing_coverage_ch
     
-//     output:
-//     tuple path("${pair_id}.paired.allout.txt"), path("${pair_id}.pbc.paired.txt"), path("${pair_id}.unpaired.allout.txt"), path("${pair_id}.pbc.unpaired.txt") into pcr_bottleneck_coefficient_out_ch
+    output:
+    tuple val(pair_id), path("${pair_id}.merged.mosdepth.global.dist.txt") into mosdepth_sequencing_coverage_out_ch
 
-//     shell:
-//     '''
-//     bedtools bamtobed -bedpe -i !{paired[0]} | awk 'BEGIN{{OFS="\\t"}}{{print $1, $2, $4, $6, $9, $10}}' | grep -v "^{}\\s" | sort | uniq -c  | \
-//     awk 'BEGIN{{mt=0;m0=0;m1=0;m2=0}} ($1==1) {{m1=m1+1}} ($1==2) {{m2=m2+1}} {{m0=m0+1}} {{mt=mt+$1}} END{{m1_m2=-1.0;
-//     if (m2>0) m1_m2=m1/m2;
-//     m0_mt=0;
-//     if (mt>0) m0_mt=m0/mt;
-//     m1_m0=0;
-//     if (m0>0) m1_m0=m1/m0;
-//     printf "%d %d %d %d %f %f %f\\n",mt,m0,m1,m2,m0_mt,m1_m0,m1_m2}}\' > l.txt;
-//     cat l.txt >> !{pair_id}.paired.allout.txt;
-//     awk '{print $5}' l.txt > a.txt;
-//     cat a.txt >> !{pair_id}.pbc.paired.txt;
+    script:
+    """
+    mosdepth -nx ${pair_id}.merged ${merged[0]}
+    """
+}
 
-//     bedtools bamtobed -i !{unpaired_fwd[0]} | awk 'BEGIN{{OFS="\\t"}}{{print $1, $2, $3, $6}}' | grep -v "^{}\\s" | sort | uniq -c  | \
-//     awk 'BEGIN{{mt=0;m0=0;m1=0;m2=0}} ($1==1) {{m1=m1+1}} ($1==2) {{m2=m2+1}} {{m0=m0+1}} {{mt=mt+$1}} END{{m1_m2=-1.0;
-//     if (m2>0) m1_m2=m1/m2;
-//     m0_mt=0;
-//     if (mt>0) m0_mt=m0/mt;
-//     m1_m0=0;
-//     if (m0>0) m1_m0=m1/m0;
-//     printf "%d %d %d %d %f %f %f\\n",mt,m0,m1,m2,m0_mt,m1_m0,m1_m2}}\' > l.txt;
-//     cat l.txt >> !{pair_id}.unpaired.allout.txt;
-//     awk '{print $5}' l.txt > a.txt;
-//     cat a.txt >> !{pair_id}.pbc.unpaired.txt;
 
-//     bedtools bamtobed -i !{unpaired_rev[0]} | awk 'BEGIN{{OFS="\\t"}}{{print $1, $2, $3, $6}}' | grep -v "^{}\\s" | sort | uniq -c  | \
-//     awk 'BEGIN{{mt=0;m0=0;m1=0;m2=0}} ($1==1) {{m1=m1+1}} ($1==2) {{m2=m2+1}} {{m0=m0+1}} {{mt=mt+$1}} END{{m1_m2=-1.0;
-//     if (m2>0) m1_m2=m1/m2;
-//     m0_mt=0;
-//     if (mt>0) m0_mt=m0/mt;
-//     m1_m0=0;
-//     if (m0>0) m1_m0=m1/m0;
-//     printf "%d %d %d %d %f %f %f\\n",mt,m0,m1,m2,m0_mt,m1_m0,m1_m2}}\' > l.txt;
-//     cat l.txt >> !{pair_id}.unpaired.allout.txt;
-//     awk '{print $5}' l.txt > a.txt;
-//     cat a.txt >> !{pair_id}.pbc.unpaired.txt;
-//     '''
-// }
+process mosdepth_plot_seq_coverage{
+    tag pair_id
+    publishDir mosdepth_sequencing_coverage_publishDir, mode: 'copy'
+    conda "${envs_dir}/python3.yaml"
 
-// // // containerOptions '-u $(id -u):$(id -g)'
-// // // NB we tried several other samtools docker images but they either gave permission errors or they didn't play
-// // // well with bash. Instead of fixing the permission error we are using the below docker that worked without
-// // // needing to add additional run time parameters.
-// // // TODO this is another option for the sequencing depth zlskidmore/mosdepth.
-// // // Could be worth testing for speed as the below is extremely slow.
-// // // TODO we will leave this out for the time being.
-// // // process mosdepth_sequencing_coverage{
-// // //     tag pair_id
-// // //     publishDir mosdepth_sequencing_coverage_publishDir, mode: 'copy'
-// // //     container 'singlecellpipeline/samtools:v0.0.3'
-    
-// // //     input:
-// // //     tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from mosdepth_sequencing_coverage_ch
-    
-// // //     output:
-// // //     tuple path("${pair_id}.paired.coverage.txt"), path("${pair_id}.unpaired.1.coverage.txt"), path("${pair_id}.unpaired.2.coverage.txt") into mosdepth_sequencing_coverage_out_ch
+    input:
+    tuple val(pair_id), path(merged) from mosdepth_sequencing_coverage_out_ch
 
-// // //     shell:
-// // //     '''
-// // //     samtools mpileup -aa -Q 1 !{paired} | cut -f 1,2,4 | cat > aaaa.txt
-// // //     awk '{sum+=$3; sumsq+=$3^2} END { print "Average Coverage = ",sum/NR; print "Stdev = ",sqrt(sumsq/NR - (sum/NR)^2)}' aaaa.txt > !{pair_id}.paired.coverage.txt
-// // //     touch paired_done
-// // //     samtools mpileup -aa -Q 1 !{unpaired_fwd} | cut -f 1,2,4 | cat > aaaa.txt
-// // //     awk '{sum+=$3; sumsq+=$3^2} END { print "Average Coverage = ",sum/NR; print "Stdev = ",sqrt(sumsq/NR - (sum/NR)^2)}' aaaa.txt > !{pair_id}.unpaired.1.coverage.txt
-// // //     touch unpaired.1_done
-// // //     samtools mpileup -aa -Q 1 !{unpaired_rev} | cut -f 1,2,4 | cat > aaaa.txt
-// // //     awk '{sum+=$3; sumsq+=$3^2} END { print "Average Coverage = ",sum/NR; print "Stdev = ",sqrt(sumsq/NR - (sum/NR)^2)}' aaaa.txt > !{pair_id}.unpaired.2.coverage.txt
-// // //     touch unpaired.2_done
-// // //     rm aaaa.txt
-// // //     rm *done
-// // //     '''
-// // // }
+    output:
+    path("${pair_id}.merged.mostdepth.html") into mosdepth_plot_seq_coverage_out_ch
 
-// // // -n = dont output per-base depth. skipping this output will speed execution
-// // // -x = dont look at internal cigar operations or correct mate overlaps (recommended for most use-cases)
-// process mosdepth_sequencing_coverage{
-//     tag pair_id
-//     publishDir mosdepth_sequencing_coverage_publishDir, mode: 'copy'
-//     container 'davelabhub/mosdepth:0.2.5--hb763d49_0'
-    
-//     input:
-//     tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from mosdepth_sequencing_coverage_ch
-    
-//     output:
-//     tuple val(pair_id), path("${pair_id}.paired.mosdepth.global.dist.txt"), path("${pair_id}.unpaired.1.mosdepth.global.dist.txt"), path("${pair_id}.unpaired.2.mosdepth.global.dist.txt") into mosdepth_sequencing_coverage_out_ch
+    script:
+    """
+    python3 ${bin_dir}/plot-dist.py -o ${pair_id}.merged.mostdepth.html ${merged}
+    """
+}
+// END OF EVALUATION METRICS
 
-//     script:
-//     """
-//     mosdepth -nx ${pair_id}.paired ${paired[0]}
-//     mosdepth -nx ${pair_id}.unpaired.1 ${unpaired_fwd[0]}
-//     mosdepth -nx ${pair_id}.unpaired.2 ${unpaired_rev[0]}
-//     """
-// }
-
-// process mosdepth_plot_seq_coverage{
-//     tag pair_id
-//     publishDir mosdepth_sequencing_coverage_publishDir, mode: 'copy'
-//     conda "${envs_dir}/python3.yaml"
-
-//     input:
-//     tuple val(pair_id), path(paired), path(unpaired_fwd), path(unpaired_rev) from mosdepth_sequencing_coverage_out_ch
-
-//     output:
-//     tuple path("${pair_id}.paired.mostdepth.html"), path("${pair_id}.unpaired.1.mostdepth.html"), path("${pair_id}.unpaired.2.mostdepth.html")
-
-//     script:
-//     """
-//     python3 ${bin_dir}/plot-dist.py -o ${pair_id}.paired.mostdepth.html ${paired}
-//     python3 ${bin_dir}/plot-dist.py -o ${pair_id}.unpaired.1.mostdepth.html ${unpaired_fwd}
-//     python3 ${bin_dir}/plot-dist.py -o ${pair_id}.unpaired.2.mostdepth.html ${unpaired_rev}
-//     """
-// }
-
+// START OF GATK HAPLOTYPE CALLING
 // // TODO the copy can be changed to move at a later date.
-// // NB something I've stubled across by accident.
 // // If we use the ref_genome as the path to the ref genome, then the output is in the working dir of this
 // // nextflow process. But if we use params.ref_assembly_path then the .fai and .dict are output in
 // // the params.ref_asssembly_path directory. WHich is good for now but could cause complicaitons
 // // once were on BINAC or some
-process index_dictionary_refgenome{
-    container 'broadinstitute/gatk:latest'
-    publishDir ref_assembly_dir, mode: 'copy', saveAs: {filename -> if(filename.toString().endsWith(".fai") || filename.toString().endsWith(".dict")){return "${filename}";}else{return null;}}
+// process index_dictionary_refgenome{
+//     container 'broadinstitute/gatk:latest'
+//     publishDir ref_assembly_dir, mode: 'copy', saveAs: {filename -> if(filename.toString().endsWith(".fai") || filename.toString().endsWith(".dict")){return "${filename}";}else{return null;}}
 
-    input:
-    path ref_genome from params.ref_assembly_path
+//     input:
+//     path ref_genome from params.ref_assembly_path
 
-    output:
-    tuple path("*.dict"), path("*.fai") into index_dictionary_refgenome_out_ch
-    path ref_genome into gatk_index_ch
+//     output:
+//     tuple path("*.dict"), path("*.fai") into index_dictionary_refgenome_out_ch
+//     path ref_genome into gatk_index_ch
 
-    script:
-    """
-    gatk CreateSequenceDictionary -R ${ref_genome}
-    samtools faidx ${ref_genome}
-    """
-}
+//     script:
+//     """
+//     gatk CreateSequenceDictionary -R ${ref_genome}
+//     samtools faidx ${ref_genome}
+//     """
+// }
 
-// // // TODO it is unclear if we move fowards with the unpaired files or not.
-// // NB HaplotypCaller requires a .fai
-// // https://gatk.broadinstitute.org/hc/en-us/articles/360035531652-FASTA-Reference-genome-format
-// // gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${unpaired_fwd[0]} -O ${pair_id}.unpaired.1.g.vcf.gz -ERC GVCF;
-// // gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${unpaired_rev[0]} -O ${pair_id}.unpaired.2.g.vcf.gz -ERC GVCF;
-process gatk_haplotype_caller_gvcf{
-    tag pair_id
-    container 'broadinstitute/gatk:latest'
-    cpus params.gatk_haplotype_caller_cpus
 
-    input:
-    tuple val(pair_id), path(merged) from gatk_haplotype_caller_gvcf_ch
-    path ref_genome from gatk_index_ch
+// // // NB HaplotypCaller requires a .fai
+// // // https://gatk.broadinstitute.org/hc/en-us/articles/360035531652-FASTA-Reference-genome-format
+// process gatk_haplotype_caller_gvcf{
+//     tag pair_id
+//     container 'broadinstitute/gatk:latest'
+//     cpus params.gatk_haplotype_caller_cpus
 
-    output:
-    tuple val(pair_id), path("${pair_id}.merged.g.vcf.gz") into genomics_db_import_ch
-    tuple val(pair_id), path("${pair_id}.merged.g.vcf.gz.tbi") into genomics_db_import_tbi_ch
+//     input:
+//     tuple val(pair_id), path(merged) from gatk_haplotype_caller_gvcf_ch
+//     path ref_genome from gatk_index_ch
 
-    script:
-    """
-    gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
-    """
-}
-// https://github.com/IARCbioinfo/gatk4-GenotypeGVCFs-nf/blob/master/gatk4-GenotypeGVCFs.nf
-// // TODO Stragtegy:
-// // We will try to do the variant calling on a per scaffold (chromosone) basis.
-// // In theory, the scattering (as its called) should be beneficial to run time as it
-// // allows a parallel implementation of the per sample variant consolidating, and the variant calling.
-// // 1 - run GenomicsDBImport on a per scafhold basis
-// // 2 - run GenotypeGVCFs on a per chromosome basis.
-// // 3 - run the filtering of the vcfs on a per chromosome basis
-// // 4 - finally run GatherVcfs to collect the per chromosome files into a single vcf.
-// // At this point we will be back in line with Till's pipeline.
-// // genomics_db_import_ch.take(2).collect{it[1]}.view()
-// // gatk  --java-options '-DGATK_STACKTRACE_ON_USER_EXCEPTION=true' GenomicsDBImport ${gvcf.collect { "-V $it " }.join()} --genomicsdb-workspace-path genomicsdbi.out.${scaffold} -L ${scaffold} --batch-size 50
-// // NC_034409.1
-// // each scaffold from scaffold_list_ch
-// // specific problem reported mpg_L16980-1_D4714_S56_sub_10000.paired.g.vcf.gz.tbi
-// // The problem is that the .tbi is also being passed in to the command and it can't find the CHROM header in it obviously.
-// genomics_db_import_ch.take(2).collect{it[1]}.view()
-// genomics_db_import_tbi_ch.take(2).collect{it[1]}.view()
-// TODO we are having caching issue here we will investigate using a subset of the chromosomes
+//     output:
+//     tuple val(pair_id), path("${pair_id}.merged.g.vcf.gz") into genomics_db_import_ch
+//     tuple val(pair_id), path("${pair_id}.merged.g.vcf.gz.tbi") into genomics_db_import_tbi_ch
 
-process genomics_db_import{
-    tag "${scaffold}"
-    cpus 5
-    container 'broadinstitute/gatk:latest'
+//     script:
+//     """
+//     gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
+//     """
+// }
 
-    input:
-    each scaffold from scaffold_list_ch
-    path(gvcf) from genomics_db_import_ch.collect{it[1]}
-    path(gvcf_tbi) from genomics_db_import_tbi_ch.collect{it[1]}
+// // // Call variants on a per scaffold (chromosone) basis.
+// // // Follow a scatter-gather strategy 
+// // // 1 - run GenomicsDBImport on a per scaffold basis
+// // // 2 - run GenotypeGVCFs on a per scaffold basis.
+// // // 3 - Gather the per scaffold files using GatherVcfs and evaluate using bcftools stats and rtg vcfstats
+// // // 4 - Hard filter the vcfs on a per scaffold basis using VariantFiltration and remove the filtered variants using SelectVariants
+// // // 5 - Gather the per scaffold files using GatherVcfs GatherVcfs to collect the per chromosome files into a single vcf
+// // // 6 - Make the BQSR recallibration table on a persample basis with BaseRecalibrator using the vcf from 5 as known variants
+// // // 7 - Apply the recalibration table from 6 on a per sample basis with  ApplyBQSR
+// // // 8 - Make a second recalibration table, using the new bam files from 7 as input and the output from 5 as known variants using BaseRecalibrator
+// // // 9 - Produce metrics for the change between the bam files using before and after recalibration using the two tables as input using AnalyzeCovariates
+// // Good reference for the nextflow coding: https://github.com/IARCbioinfo/gatk4-GenotypeGVCFs-nf/blob/master/gatk4-GenotypeGVCFs.nf
+// process genomics_db_import{
+//     tag "${scaffold}"
+//     cpus 5
+//     container 'broadinstitute/gatk:latest'
+
+//     input:
+//     each scaffold from scaffold_list_ch
+//     path(gvcf) from genomics_db_import_ch.collect{it[1]}
+//     path(gvcf_tbi) from genomics_db_import_tbi_ch.collect{it[1]}
 	
-	output:
-    tuple val(scaffold), file("genomicsdbi.out.${scaffold}") into genotype_GVCFs_ch
+// 	output:
+//     tuple val(scaffold), file("genomicsdbi.out.${scaffold}") into genotype_GVCFs_ch
 	
-    script:
-	"""
-	gatk  --java-options '-DGATK_STACKTRACE_ON_USER_EXCEPTION=true' GenomicsDBImport ${gvcf.collect { "-V $it " }.join()} --genomicsdb-workspace-path genomicsdbi.out.${scaffold} -L $scaffold --batch-size 50
-	"""
-}
+//     script:
+// 	"""
+// 	gatk  --java-options '-DGATK_STACKTRACE_ON_USER_EXCEPTION=true' GenomicsDBImport ${gvcf.collect { "-V $it " }.join()} --genomicsdb-workspace-path genomicsdbi.out.${scaffold} -L $scaffold --batch-size 50
+// 	"""
+// }
 
-// TODO an alternative to passing int he ref_genome_fai and ref_genome_dict (has a typo in the code)
-// Is to pass the param to the actual path
-process GenotypeGVCFs{
-    container 'broadinstitute/gatk:latest'
-	cpus 5
-	tag "${scaffold}"
+// // NB an alternative to passing int the ref_genome_fai and ref_genome_dict
+// // is to pass the param to the actual path
+// process GenotypeGVCFs{
+//     container 'broadinstitute/gatk:latest'
+// 	cpus 5
+// 	tag "${scaffold}"
 
-	publishDir genotype_GVCFs_publishDir, mode: 'copy', pattern: '*.{vcf,idx}'
+// 	publishDir genotype_GVCFs_publishDir, mode: 'copy', pattern: '*.{vcf,idx}'
 
-    input:
-	tuple val(scaffold), file(workspace) from genotype_GVCFs_ch
-   	path genome from params.ref_assembly_path
-    path ref_genome_fai from ref_assembly_fai_path
-    path reg_genome_dict from ref_assembly_dict_path
+//     input:
+// 	tuple val(scaffold), file(workspace) from genotype_GVCFs_ch
+//    	path genome from params.ref_assembly_path
+//     path ref_genome_fai from ref_assembly_fai_path
+//     path ref_genome_dict from ref_assembly_dict_path
 
-	output:
-    tuple val(scaffold), file("GenotypeGVCFs.out.${scaffold}.vcf"), file("GenotypeGVCFs.out.${scaffold}.vcf.idx") into hard_filter_ch
-    file("GenotypeGVCFs.out.${scaffold}.vcf") into gather_vcfs_for_eval_ch
-    file("GenotypeGVCFs.out.${scaffold}.vcf.idx") into gather_vcfs_idx_for_eval_ch
+// 	output:
+//     tuple val(scaffold), file("GenotypeGVCFs.out.${scaffold}.vcf"), file("GenotypeGVCFs.out.${scaffold}.vcf.idx") into hard_filter_ch
+//     file("GenotypeGVCFs.out.${scaffold}.vcf") into gather_vcfs_for_eval_ch
+//     file("GenotypeGVCFs.out.${scaffold}.vcf.idx") into gather_vcfs_idx_for_eval_ch
 
-    script:
-	"""
-    WORKSPACE=\$( basename ${workspace} )
-    gatk GenotypeGVCFs -R ${genome} -O GenotypeGVCFs.out.${scaffold}.vcf \
-    --only-output-calls-starting-in-intervals -V gendb://\$WORKSPACE -L ${scaffold}
-	"""
-}
+//     script:
+// 	"""
+//     WORKSPACE=\$( basename ${workspace} )
+//     gatk GenotypeGVCFs -R ${genome} -O GenotypeGVCFs.out.${scaffold}.vcf \
+//     --only-output-calls-starting-in-intervals -V gendb://\$WORKSPACE -L ${scaffold}
+// 	"""
+// }
 
-// TODO do a gather vcf and run stats metrics on it. Use these metrics to compare to the prvious iteration.
-// Upon evaluation, if one more round of BQSR is required then we proceed below.
-// Else move forwards with move foward with the called variants.
-process gather_vcfs_for_eval{
-	tag "GatherVcfs_for_eval"
-    container 'broadinstitute/gatk:latest'
-    publishDir gatk_output_variants_publishDir
+// process gather_vcfs_for_eval{
+// 	tag "GatherVcfs_for_eval"
+//     container 'broadinstitute/gatk:latest'
+//     publishDir gatk_output_variants_publishDir
 
-    input:
-    val(scaffhold_list) from Channel.fromList(scaffold_list).collect()
-    path(vcf) from gather_vcfs_for_eval_ch.collect()
-	path(vcf_idx) from gather_vcfs_idx_for_eval_ch.collect()
+//     input:
+//     val(scaffhold_list) from Channel.fromList(scaffold_list).collect()
+//     path(vcf) from gather_vcfs_for_eval_ch.collect()
+// 	path(vcf_idx) from gather_vcfs_idx_for_eval_ch.collect()
 
-	output:
-    tuple path("fowl.eval.vcf"), path("fowl.eval.vcf.idx") into bcftools_stats_ch,rtg_vcfstats_ch
+// 	output:
+//     tuple path("fowl.eval.vcf"), path("fowl.eval.vcf.idx") into bcftools_stats_ch,rtg_vcfstats_ch
 
-    script:
-	"""
-	gatk GatherVcfs ${scaffhold_list.collect{ "--INPUT GenotypeGVCFs.out.${it}.vcf " }.join()} --OUTPUT fowl.eval.vcf
-	"""
-}
+//     script:
+// 	"""
+// 	gatk GatherVcfs ${scaffhold_list.collect{ "--INPUT GenotypeGVCFs.out.${it}.vcf " }.join()} --OUTPUT fowl.eval.vcf
+// 	"""
+// }
 
-// TODO let's try running the statistics with two different programs and see what we get out
-// https://genomics.sschmeier.com/ngs-variantcalling/index.html
-// rtg vcfstats
-// bcftools stats
-process bcftools_vcfstats{
-    tag "bcftools_stats"
-    container "halllab/bcftools:v1.9"
-    publishDir vcf_stats_publishDir
+// // useful reference for rtg: https://genomics.sschmeier.com/ngs-variantcalling/index.html
+// process bcftools_vcfstats{
+//     tag "bcftools_stats"
+//     container "halllab/bcftools:v1.9"
+//     publishDir vcf_stats_publishDir
 
-    input:
-    tuple path(vcf), path(vcf_idx) from bcftools_stats_ch
+//     input:
+//     tuple path(vcf), path(vcf_idx) from bcftools_stats_ch
 
-    output:
-    path("bcftools.stats.txt") into bcftools_stats_out_ch
+//     output:
+//     path("bcftools.stats.txt") into bcftools_stats_out_ch
 
-    script:
-    """
-    touch tester
-    bcftools stats -F ${params.ref_assembly_path} -s - $vcf > bcftools.stats.txt
-    """
-}
+//     script:
+//     """
+//     bcftools stats -F ${params.ref_assembly_path} -s - $vcf > bcftools.stats.txt
+//     """
+// }
 
 
-// This produces a really handy per sample output but ideally we'd also like a summary metric
-// As such, we then pass the output of this process into another process to generate this output
-process rtg_vcfstats_per_sample{
-    tag "rtg_vcfstats"
-    container 'realtimegenomics/rtg-tools:latest'
-    publishDir vcf_stats_publishDir
+// // This produces a really handy per sample output but ideally we'd also like a summary metric
+// // We have written and use summarise_rtg_vcfstats.py to do this.
+// // It outputs a file rtg.stats.summary*.txt (with optional iteration annotation) that contains the total
+// // SNPs and weighted averges (SNPs per sample) of a selection of metrics including Ti/Tv ratio and insertion/deletion ratio
+// process rtg_vcfstats_per_sample{
+//     tag "rtg_vcfstats"
+//     container 'realtimegenomics/rtg-tools:latest'
+//     publishDir vcf_stats_publishDir
 
-    input:
-    tuple path(vcf), path(vcf_idx) from rtg_vcfstats_ch
+//     input:
+//     tuple path(vcf), path(vcf_idx) from rtg_vcfstats_ch
 
-    output:
-    path("rtg.stats.per_sample.txt") into rtg_vcfstats_out_ch
+//     output:
+//     path("rtg.stats.per_sample.txt") into rtg_vcfstats_out_ch
 
-    script:
-    """
-    rtg vcfstats $vcf > rtg.stats.per_sample.txt
-    """
+//     script:
+//     """
+//     rtg vcfstats $vcf > rtg.stats.per_sample.txt
+//     """
 
-}
+// }
 
-process rtg_vcfstats_summary{
-    tag "rtg_vcfstats_summary"
-    container 'broadinstitute/gatk:latest'
-    publishDir vcf_stats_publishDir
+// process rtg_vcfstats_summary{
+//     tag "rtg_vcfstats_summary"
+//     container 'broadinstitute/gatk:latest'
+//     publishDir vcf_stats_publishDir
 
-    input:
-    path(rtg_vcfstats_output) from rtg_vcfstats_out_ch
+//     input:
+//     path(rtg_vcfstats_output) from rtg_vcfstats_out_ch
 
-    output:
-    path("rtg.stats.summary*.txt") into rtg_vcfstats_summary_out_ch
+//     output:
+//     path("rtg.stats.summary*.txt") into rtg_vcfstats_summary_out_ch
 
-    script:
-    """
-    python3 ${bin_dir}/summarise_rtg_vcfstats.py $rtg_vcfstats_output
-    """
-}
+//     script:
+//     """
+//     python3 ${bin_dir}/summarise_rtg_vcfstats.py $rtg_vcfstats_output
+//     """
+// }
 
-// SelectVariants is also available to us if we want to further remove the variants from the filtered files
-// N.B. These are the genotypes that have been called, and it is iterations of these that we will want to compare.
-// TODO have a look at the ApplyBQSR to see if we should be using the masked version of the vcf or the selected version.
-process hard_filter{
-	tag {scaffold}
-    container 'broadinstitute/gatk:latest'
-    cpus 5
+// process hard_filter{
+// 	tag {scaffold}
+//     container 'broadinstitute/gatk:latest'
+//     cpus 5
 
-    input:
-	tuple val(scaffold), path(vcf), path(vcfidx) from hard_filter_ch
+//     input:
+// 	tuple val(scaffold), path(vcf), path(vcfidx) from hard_filter_ch
 
-	output:
-    file("${scaffold}.filtered.vcf") into vcf_gather_vcfs_ch
-    file("${scaffold}.filtered.vcf.idx") into vcf_idx_gather_vcfs_ch
+// 	output:
+//     file("${scaffold}.filtered.vcf") into vcf_gather_vcfs_ch
+//     file("${scaffold}.filtered.vcf.idx") into vcf_idx_gather_vcfs_ch
 
-    script:
-	"""
-	gatk VariantFiltration \
-    -filter "Qual >= 100" --filter-name "Qual100" \
-    -filter "QD < 2.0" --filter-name "QD2" \
-    -filter "MQ < 35.0" --filter-name "MQ35" \
-    -filter "FS > 60.0" --filter-name "FS60" \
-    -filter "HaplotypeScore > 13.0" --filter-name "Haplo13" \
-    -filter "MQRankSum < -12.5" --filter-name "MQRankSum-12" \
-    -filter "ReadPosRankSum < -8.0" --filter-name "ReadPosRank-8" \
-    -V ${vcf} -O ${scaffold}.markfiltered.vcf
+//     script:
+// 	"""
+// 	gatk VariantFiltration \
+//     -filter "Qual >= 100" --filter-name "Qual100" \
+//     -filter "QD < 2.0" --filter-name "QD2" \
+//     -filter "MQ < 35.0" --filter-name "MQ35" \
+//     -filter "FS > 60.0" --filter-name "FS60" \
+//     -filter "HaplotypeScore > 13.0" --filter-name "Haplo13" \
+//     -filter "MQRankSum < -12.5" --filter-name "MQRankSum-12" \
+//     -filter "ReadPosRankSum < -8.0" --filter-name "ReadPosRank-8" \
+//     -V ${vcf} -O ${scaffold}.markfiltered.vcf
 
-    gatk SelectVariants --exclude-filtered \
-      -V ${scaffold}.markfiltered.vcf \
-      -O ${scaffold}.filtered.vcf
-	"""
-}
+//     gatk SelectVariants --exclude-filtered \
+//       -V ${scaffold}.markfiltered.vcf \
+//       -O ${scaffold}.filtered.vcf
+// 	"""
+// }
 
-// TODO consolidate
-// TODO we are going to have to write some code here to get the VCFs in scaffold order.
-// We are going to have to do that using the scaffold list.
-// We should first write some dummy code to check wether we can bring in the external list here.
-// TODO probably best to add ".filtered" (and an iteration int) to the .vcf and .idx outputs from this process.
-process gather_vcfs{
-	tag "GatherVcfs"
-    container 'broadinstitute/gatk:latest'
+// // NB GatherVcfs must be provided with the vcf files in order of the scaffolds. We do this using the scaffhold_list.
+// process gather_vcfs{
+// 	tag "GatherVcfs"
+//     container 'broadinstitute/gatk:latest'
 
-    input:
-    val(scaffhold_list) from scaffold_list_gather_vcfs_ch.collect()
-    path(vcf) from vcf_gather_vcfs_ch.collect()
-	path(vcf_idx) from vcf_idx_gather_vcfs_ch.collect()
+//     input:
+//     val(scaffhold_list) from scaffold_list_gather_vcfs_ch.collect()
+//     path(vcf) from vcf_gather_vcfs_ch.collect()
+// 	path(vcf_idx) from vcf_idx_gather_vcfs_ch.collect()
 
-	output:
-    tuple path("fowl.vcf"), path("fowl.vcf.idx") into make_bqsr_tables_known_variants_ch,make_bqsr_tables_known_variants_round_2_ch
+// 	output:
+//     tuple path("fowl.filtered.vcf"), path("fowl.filtered.vcf.idx") into make_bqsr_tables_known_variants_ch,make_bqsr_tables_known_variants_round_2_ch
 
-    script:
-	"""
-	gatk GatherVcfs ${scaffhold_list.collect{ "--INPUT ${it}.filtered.vcf " }.join()} --OUTPUT fowl.vcf
-	"""
-}
+//     script:
+// 	"""
+// 	gatk GatherVcfs ${scaffhold_list.collect{ "--INPUT ${it}.filtered.vcf " }.join()} --OUTPUT fowl.filtered.vcf
+// 	"""
+// }
 
-// make_bqsr_tables_bam_ch.take(5).combine(make_bqsr_tables_known_variants_ch).view()
 
-// We will want to do this on a per sample basis
-// We will want to use the fowl.vcf and the fowl.vcf.idx multiple times withhout using them up
-// It may be that we have to output these files as values rather than path/files in the gather_vcf process.
-// make_bqsr_tables_known_variants_ch.view()
-process make_bqsr_tables{
-    tag {pair_id}
-    container 'broadinstitute/gatk:latest'
+// // We will want to do this on a per sample basis
+// // We will want to use the fowl.vcf and the fowl.vcf.idx multiple times withhout using them up
+// // It may be that we have to output these files as values rather than path/files in the gather_vcf process.
+// // make_bqsr_tables_known_variants_ch.view()
+// process make_bqsr_tables{
+//     tag {pair_id}
+//     container 'broadinstitute/gatk:latest'
 
-    input:
-    tuple val(pair_id), path(merged_bam), path(known_variants), path(known_variants_idx) from make_bqsr_tables_bam_ch.combine(make_bqsr_tables_known_variants_ch)
+//     input:
+//     tuple val(pair_id), path(merged_bam), path(known_variants), path(known_variants_idx) from make_bqsr_tables_bam_ch.combine(make_bqsr_tables_known_variants_ch)
 
-    output:
-    tuple val(pair_id), path(merged_bam), path("${pair_id}.table") into apply_bqsr_tables_ch
-    tuple val(pair_id), path("${pair_id}.table") into compare_tables_round_1_ch
+//     output:
+//     tuple val(pair_id), path(merged_bam), path("${pair_id}.table") into apply_bqsr_tables_ch
+//     tuple val(pair_id), path("${pair_id}.table") into compare_tables_round_1_ch
 
-    script:
-    """
-    gatk BaseRecalibrator -I ${merged_bam[0]} -R ${params.ref_assembly_path} \
-    --known-sites $known_variants -O ${pair_id}.table
-    """
-}
+//     script:
+//     """
+//     gatk BaseRecalibrator -I ${merged_bam[0]} -R ${params.ref_assembly_path} \
+//     --known-sites $known_variants -O ${pair_id}.table
+//     """
+// }
 
-process apply_bqsr_tables{
-    tag {pair_id}
-    container 'broadinstitute/gatk:latest'
+// process apply_bqsr_tables{
+//     tag {pair_id}
+//     container 'broadinstitute/gatk:latest'
 
-    input:
-    tuple val(pair_id), path(merged_bam), path(table) from apply_bqsr_tables_ch
+//     input:
+//     tuple val(pair_id), path(merged_bam), path(table) from apply_bqsr_tables_ch
 
-    output:
-    tuple val(pair_id), path("${pair_id}.recalibrated.bam{,.bai}") into apply_bqsr_tables_out_ch,apply_bqsr_tables_round_2_ch
+//     output:
+//     tuple val(pair_id), path("${pair_id}.recalibrated.bam{,.bai}") into apply_bqsr_tables_out_ch,apply_bqsr_tables_round_2_ch
 
-    script:
-    """
-    gatk ApplyBQSR -R ${params.ref_assembly_path} -I ${merged_bam[0]} \
-    --bqsr-recal-file $table \
-    -O ${pair_id}.recalibrated.bam;
-    """
-}
+//     script:
+//     """
+//     gatk ApplyBQSR -R ${params.ref_assembly_path} -I ${merged_bam[0]} \
+//     --bqsr-recal-file $table \
+//     -O ${pair_id}.recalibrated.bam;
+//     """
+// }
 
-// TODO attempt to get a graphical output of the effect of performing the BQSR
-// TODO this we will perform another BaseRecalibrator on the recalibrated BAM and then run
-// AnalyzeCovariates to get a graphical output of the change.
-// https://github.com/broadinstitute/gatk/issues/322
+// // See the below issue to get an idea of the general strategy of getting AnalyzeCovariates to work in 
+// // GATK 4.
+// // https://github.com/broadinstitute/gatk/issues/322
 
-process make_bqsr_tables_round_2{
-    tag {pair_id}
-    container 'broadinstitute/gatk:latest'
+// process make_bqsr_tables_round_2{
+//     tag {pair_id}
+//     container 'broadinstitute/gatk:latest'
 
-    input:
-    tuple val(pair_id), path(merged_bam), path(known_variants), path(known_variants_idx) from apply_bqsr_tables_round_2_ch.combine(make_bqsr_tables_known_variants_round_2_ch)
+//     input:
+//     tuple val(pair_id), path(merged_bam), path(known_variants), path(known_variants_idx) from apply_bqsr_tables_round_2_ch.combine(make_bqsr_tables_known_variants_round_2_ch)
 
-    output:
-    tuple val(pair_id), path("${pair_id}.after.table") into compare_tables_round_2_ch
+//     output:
+//     tuple val(pair_id), path("${pair_id}.after.table") into compare_tables_round_2_ch
 
-    script:
-    """
-    gatk BaseRecalibrator -I ${merged_bam[0]} -R ${params.ref_assembly_path} \
-    --known-sites $known_variants -O ${pair_id}.after.table
-    """
+//     script:
+//     """
+//     gatk BaseRecalibrator -I ${merged_bam[0]} -R ${params.ref_assembly_path} \
+//     --known-sites $known_variants -O ${pair_id}.after.table
+//     """
 
-}
+// }
 
-process AnalyzeCovariates{
-    tag {pair_id}
-    container 'broadinstitute/gatk:latest'
-    publishDir analyze_covariates_publishDir
+// process AnalyzeCovariates{
+//     tag {pair_id}
+//     container 'broadinstitute/gatk:latest'
+//     publishDir analyze_covariates_publishDir
 
-    input:
-    tuple val(pair_id), path(table_before), path(table_after) from compare_tables_round_1_ch.join(compare_tables_round_2_ch)
+//     input:
+//     tuple val(pair_id), path(table_before), path(table_after) from compare_tables_round_1_ch.join(compare_tables_round_2_ch)
 
-    output:
-    tuple val(pair_id), path("${pair_id}.BQSR.csv"), path("${pair_id}.BQSR.pdf") into compare_tables_round_2_out_ch
+//     output:
+//     tuple val(pair_id), path("${pair_id}.BQSR.csv"), path("${pair_id}.BQSR.pdf") into compare_tables_round_2_out_ch
     
-    script:
-    """
-    gatk AnalyzeCovariates \
-      -before $table_before \
-      -after $table_after \
-      -csv ${pair_id}.BQSR.csv \
-      -plots ${pair_id}.BQSR.pdf
-    """
-}
+//     script:
+//     """
+//     gatk AnalyzeCovariates \
+//       -before $table_before \
+//       -after $table_after \
+//       -csv ${pair_id}.BQSR.csv \
+//       -plots ${pair_id}.BQSR.pdf
+//     """
+// }
