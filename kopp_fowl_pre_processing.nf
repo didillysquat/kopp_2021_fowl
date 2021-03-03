@@ -294,7 +294,7 @@ process markduplicates_spark{
     tuple val(pair_id), file(merged) from mark_duplicates_ch
 
     output:
-    tuple val(pair_id), file("${pair_id}.merged.deduplicated.sorted.bam{,.bai}") into pre_seq_c_curve_ch,collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mosdepth_sequencing_coverage_ch,gatk_haplotype_caller_gvcf_ch,make_bqsr_tables_bam_ch
+    tuple val(pair_id), file("${pair_id}.merged.deduplicated.sorted.bam{,.bai}") into collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mosdepth_sequencing_coverage_ch
     file("${pair_id}.merged.deduplicated.sorted.metrics.txt") into mark_duplicate_metrics_ch
 
     script:
