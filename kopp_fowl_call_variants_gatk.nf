@@ -13,12 +13,10 @@ bin_dir = "${workflow.launchDir}/bin"
 
 if (params.subsample){
     params.output_dir = "${workflow.launchDir}/outputs_sub_sampled/"
-    gatk_per_scaffold_vcf_publishDir = [params.output_dir, "gatk_scaffold_vcfs_sub_${params.subsample_depth}"].join(File.separator)
     gatk_output_vcf_publishDir = [params.output_dir, "gatk_output_variants_sub_${params.subsample_depth}"].join(File.separator)
     gatk_vcf_stats_publishDir = [params.output_dir, "gatk_vcf_stats_sub_${params.subsample_depth}"].join(File.separator)
 }else{
     params.output_dir = "${workflow.launchDir}/outputs"
-    gatk_per_scaffold_vcf_publishDir = [params.output_dir, "gatk_scaffold_vcfs_GVCFs"].join(File.separator)
     gatk_output_vcf_publishDir = [params.output_dir, "gatk_output_variants"].join(File.separator)
     gatk_vcf_stats_publishDir = [params.output_dir, "gatk_vcf_stats"].join(File.separator)
 }
@@ -57,6 +55,13 @@ process index_dictionary_refgenome{
     """
 }
 
+// // Call variants on a per scaffold (chromosone) basis and then gather back to a single vcf (scatter-gather)
+// // 1 - Call haplotypes on a per sample basis
+// // 2 - run GenomicsDBImport on a per scaffold basis
+// // 3 - run GenotypeGVCFs on a per scaffold basis.
+// // 4 - Gather the per scaffold files using GatherVcfs
+// // 5 - Evaluate the vcfs using bcftools stats and rtg vcfstats
+// NB Good reference for the scatter-gather strategy employed here: https://github.com/IARCbioinfo/gatk4-GenotypeGVCFs-nf/blob/master/gatk4-GenotypeGVCFs.nf
 // NB HaplotypCaller requires a .fai
 // https://gatk.broadinstitute.org/hc/en-us/articles/360035531652-FASTA-Reference-genome-format
 process gatk_haplotype_caller_gvcf{
@@ -78,12 +83,6 @@ process gatk_haplotype_caller_gvcf{
     """
 }
 
-// // Call variants on a per scaffold (chromosone) basis and then gather back to a single vcf (scatter-gather)
-// // 1 - run GenomicsDBImport on a per scaffold basis
-// // 2 - run GenotypeGVCFs on a per scaffold basis.
-// // 3 - Gather the per scaffold files using GatherVcfs
-// // 4 - Evaluate the vcfs using bcftools stats and rtg vcfstats
-// Good reference for the scatter-gather strategy employed here: https://github.com/IARCbioinfo/gatk4-GenotypeGVCFs-nf/blob/master/gatk4-GenotypeGVCFs.nf
 process genomics_db_import{
     tag "${scaffold}"
     cpus 1
@@ -110,7 +109,6 @@ process GenotypeGVCFs{
     container 'broadinstitute/gatk:latest'
 	cpus 5
 	tag "${scaffold}"
-	publishDir gatk_per_scaffold_vcf_publishDir, mode: 'copy', pattern: '*.{vcf,idx}'
 
     input:
 	tuple val(scaffold), file(workspace), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from genotype_GVCFs_ch.combine(GenotypeGVCFs_ref_genome_ch)
@@ -133,7 +131,7 @@ process gather_vcfs_for_eval{
     publishDir gatk_output_vcf_publishDir, mode: 'copy'
 
     input:
-    val(scaffhold_list) from Channel.fromList(scaffold_list).collect()
+    val(scaffolds) from Channel.fromList(scaffold_list).collect()
     path(vcf) from gather_vcfs_for_eval_ch.collect()
 	path(vcf_idx) from gather_vcfs_idx_for_eval_ch.collect()
 
@@ -142,7 +140,7 @@ process gather_vcfs_for_eval{
 
     script:
 	"""
-	gatk GatherVcfs ${scaffhold_list.collect{ "--INPUT GenotypeGVCFs.out.${it}.vcf " }.join()} --OUTPUT fowl.eval.vcf
+	gatk GatherVcfs ${scaffolds.collect{ "--INPUT GenotypeGVCFs.out.${it}.vcf " }.join()} --OUTPUT fowl.eval.vcf
 	"""
 }
 
