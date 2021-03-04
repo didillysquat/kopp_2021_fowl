@@ -273,7 +273,7 @@ process nextgenmap_mapping{
 
 process merge_paired_and_unpaired{
     tag "${pair_id}"
-    container 'broadinstitute/gatk:latest'
+    container 'broadinstitute/gatk:4.1.9.0'
 
     input:
     tuple val(pair_id), file(paired), file(unpaired_one), file(unpaired_two) from add_read_group_headers_ch
@@ -290,7 +290,7 @@ process merge_paired_and_unpaired{
 
 process add_read_group_headers{
     tag "${pair_id}"
-    container 'broadinstitute/gatk:latest'
+    container 'broadinstitute/gatk:4.1.9.0'
 
     input:
     tuple val(pair_id), file(merged), val(read_group_string) from read_groups_all_ch.join(Channel.fromList(read_group_map))
@@ -306,7 +306,7 @@ process add_read_group_headers{
 
 process markduplicates_spark{
     tag "${pair_id}"
-    container 'broadinstitute/gatk:latest'
+    container 'broadinstitute/gatk:4.1.9.0'
     publishDir markduplicates_metrics_publishDir, pattern: "*.metrics.txt"
 
     input:
@@ -327,7 +327,7 @@ process markduplicates_spark{
 process collect_gc_bias_metrics{
     tag pair_id
     publishDir collect_gc_bias_metrics_publishDir, mode: 'copy'
-    container 'broadinstitute/gatk:latest'
+    container 'broadinstitute/gatk:4.1.9.0'
 
     input:
     tuple val(pair_id), path(merged) from collect_gc_bias_metrics_ch
@@ -416,7 +416,7 @@ process mosdepth_plot_seq_coverage{
 // // the params.ref_asssembly_path directory. WHich is good for now but could cause complicaitons
 // // once were on BINAC or some
 // process index_dictionary_refgenome{
-//     container 'broadinstitute/gatk:latest'
+//     container 'broadinstitute/gatk:4.1.9.0'
 //     publishDir ref_assembly_dir, mode: 'copy', saveAs: {filename -> if(filename.toString().endsWith(".fai") || filename.toString().endsWith(".dict")){return "${filename}";}else{return null;}}
 
 //     input:
@@ -438,7 +438,7 @@ process mosdepth_plot_seq_coverage{
 // // // https://gatk.broadinstitute.org/hc/en-us/articles/360035531652-FASTA-Reference-genome-format
 // process gatk_haplotype_caller_gvcf{
 //     tag pair_id
-//     container 'broadinstitute/gatk:latest'
+//     container 'broadinstitute/gatk:4.1.9.0'
 //     cpus params.gatk_haplotype_caller_cpus
 
 //     input:
@@ -470,7 +470,7 @@ process mosdepth_plot_seq_coverage{
 // process genomics_db_import{
 //     tag "${scaffold}"
 //     cpus 5
-//     container 'broadinstitute/gatk:latest'
+//     container 'broadinstitute/gatk:4.1.9.0'
 
 //     input:
 //     each scaffold from scaffold_list_ch
@@ -489,7 +489,7 @@ process mosdepth_plot_seq_coverage{
 // // NB an alternative to passing int the ref_genome_fai and ref_genome_dict
 // // is to pass the param to the actual path
 // process GenotypeGVCFs{
-//     container 'broadinstitute/gatk:latest'
+//     container 'broadinstitute/gatk:4.1.9.0'
 // 	cpus 5
 // 	tag "${scaffold}"
 
@@ -516,7 +516,7 @@ process mosdepth_plot_seq_coverage{
 
 // process gather_vcfs_for_eval{
 // 	tag "GatherVcfs_for_eval"
-//     container 'broadinstitute/gatk:latest'
+//     container 'broadinstitute/gatk:4.1.9.0'
 //     publishDir gatk_output_variants_publishDir
 
 //     input:
@@ -576,7 +576,7 @@ process mosdepth_plot_seq_coverage{
 
 // process rtg_vcfstats_summary{
 //     tag "rtg_vcfstats_summary"
-//     container 'broadinstitute/gatk:latest'
+//     container 'broadinstitute/gatk:4.1.9.0'
 //     publishDir vcf_stats_publishDir
 
 //     input:
@@ -593,7 +593,7 @@ process mosdepth_plot_seq_coverage{
 
 // process hard_filter{
 // 	tag {scaffold}
-//     container 'broadinstitute/gatk:latest'
+//     container 'broadinstitute/gatk:4.1.9.0'
 //     cpus 5
 
 //     input:
@@ -624,7 +624,7 @@ process mosdepth_plot_seq_coverage{
 // // NB GatherVcfs must be provided with the vcf files in order of the scaffolds. We do this using the scaffhold_list.
 // process gather_vcfs{
 // 	tag "GatherVcfs"
-//     container 'broadinstitute/gatk:latest'
+//     container 'broadinstitute/gatk:4.1.9.0'
 
 //     input:
 //     val(scaffhold_list) from scaffold_list_gather_vcfs_ch.collect()
@@ -647,7 +647,7 @@ process mosdepth_plot_seq_coverage{
 // // make_bqsr_tables_known_variants_ch.view()
 // process make_bqsr_tables{
 //     tag {pair_id}
-//     container 'broadinstitute/gatk:latest'
+//     container 'broadinstitute/gatk:4.1.9.0'
 
 //     input:
 //     tuple val(pair_id), path(merged_bam), path(known_variants), path(known_variants_idx) from make_bqsr_tables_bam_ch.combine(make_bqsr_tables_known_variants_ch)
@@ -665,7 +665,7 @@ process mosdepth_plot_seq_coverage{
 
 // process apply_bqsr_tables{
 //     tag {pair_id}
-//     container 'broadinstitute/gatk:latest'
+//     container 'broadinstitute/gatk:4.1.9.0'
 
 //     input:
 //     tuple val(pair_id), path(merged_bam), path(table) from apply_bqsr_tables_ch
@@ -687,7 +687,7 @@ process mosdepth_plot_seq_coverage{
 
 // process make_bqsr_tables_round_2{
 //     tag {pair_id}
-//     container 'broadinstitute/gatk:latest'
+//     container 'broadinstitute/gatk:4.1.9.0'
 
 //     input:
 //     tuple val(pair_id), path(merged_bam), path(known_variants), path(known_variants_idx) from apply_bqsr_tables_round_2_ch.combine(make_bqsr_tables_known_variants_round_2_ch)
@@ -705,7 +705,7 @@ process mosdepth_plot_seq_coverage{
 
 // process AnalyzeCovariates{
 //     tag {pair_id}
-//     container 'broadinstitute/gatk:latest'
+//     container 'broadinstitute/gatk:4.1.9.0'
 //     publishDir analyze_covariates_publishDir
 
 //     input:

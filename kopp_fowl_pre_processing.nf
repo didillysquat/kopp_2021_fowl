@@ -71,7 +71,7 @@ read_group_map = {
 
 // Publish dirs
 if (params.subsample){
-    params.output_dir = "${workflow.launchDir}/sub_sampled_outputs/"
+    params.output_dir = "${workflow.launchDir}/sub_sampled_outputs/pre_processing"
     fastqc_pre_trim_publish_dir = [params.output_dir, "fastqc_pre_trim_sub_${params.subsample_depth}"].join(File.separator)
     fastqc_post_trim_publish_dir = [params.output_dir, "fastqc_post_trim_sub_${params.subsample_depth}"].join(File.separator)
     markduplicates_metrics_publishDir = [params.output_dir, "markduplicates_metrics_sub_${params.subsample_depth}"].join(File.separator)
@@ -81,7 +81,7 @@ if (params.subsample){
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient_sub_${params.subsample_depth}"].join(File.separator)
     mosdepth_sequencing_coverage_publishDir = [params.output_dir, "mosdepth_sequencing_coverage_sub_${params.subsample_depth}"].join(File.separator)
 }else{
-    params.output_dir = "${workflow.launchDir}/outputs"
+    params.output_dir = "${workflow.launchDir}/outputs/pre_processing"
     fastqc_pre_trim_publish_dir = [params.output_dir, "fastqc_pre_trim"].join(File.separator)
     fastqc_post_trim_publish_dir = [params.output_dir, "fastqc_post_trim"].join(File.separator)
     markduplicates_metrics_publishDir = [params.output_dir, "markduplicates_metrics"].join(File.separator)
@@ -247,7 +247,7 @@ process nextgenmap_mapping{
 
 process merge_paired_and_unpaired{
     tag "${pair_id}"
-    container 'broadinstitute/gatk:latest'
+    container 'broadinstitute/gatk:4.1.9.0'
     cpus 1
     memory '24 GB'
 
@@ -266,7 +266,7 @@ process merge_paired_and_unpaired{
 
 process add_read_group_headers{
     tag "${pair_id}"
-    container 'broadinstitute/gatk:latest'
+    container 'broadinstitute/gatk:4.1.9.0'
     cpus 1
     memory '24 GB'
 
@@ -284,7 +284,7 @@ process add_read_group_headers{
 
 process markduplicates_spark{
     tag "${pair_id}"
-    container 'broadinstitute/gatk:latest'
+    container 'broadinstitute/gatk:4.1.9.0'
     publishDir markduplicates_metrics_publishDir, pattern: "*.metrics.txt", mode: 'move'
     publishDir output_bam_publishDir, pattern: "*.bam{,.bai}", mode: 'copy'
     cpus 4
@@ -308,7 +308,7 @@ process markduplicates_spark{
 process collect_gc_bias_metrics{
     tag pair_id
     publishDir collect_gc_bias_metrics_publishDir, mode: 'copy'
-    container 'broadinstitute/gatk:latest'
+    container 'broadinstitute/gatk:4.1.9.0'
 
     input:
     tuple val(pair_id), path(merged) from collect_gc_bias_metrics_ch

@@ -10,22 +10,36 @@ running BQSR (e.g. by comparing Ti/Tv ratios or number of SNPs).
 */
 
 bin_dir = "${workflow.launchDir}/bin"
-
+params.iteration = 0
+params.overwrite = false
 if (params.subsample){
-    params.output_dir = "${workflow.launchDir}/outputs_sub_sampled/"
+    params.output_dir = "${workflow.launchDir}/sub_sampled_outputs/gatk_variant_calling_${params.iteration}"
     gatk_output_vcf_publishDir = [params.output_dir, "gatk_output_variants_sub_${params.subsample_depth}"].join(File.separator)
     gatk_vcf_stats_publishDir = [params.output_dir, "gatk_vcf_stats_sub_${params.subsample_depth}"].join(File.separator)
 }else{
-    params.output_dir = "${workflow.launchDir}/outputs"
+    params.output_dir = "${workflow.launchDir}/outputs/gatk_variant_calling_${params.iteration}"
     gatk_output_vcf_publishDir = [params.output_dir, "gatk_output_variants"].join(File.separator)
     gatk_vcf_stats_publishDir = [params.output_dir, "gatk_vcf_stats"].join(File.separator)
+}
+
+// We will enforce a check to make sure that the output directory doesn't already exist as we don't want to
+// accidentally overwrite the files. We will only do this check if overwrite is false.
+if(!params.overwrite){
+    // Check to see if each of the output dirs already exist
+    Path path_to_check = Paths.get(params.output_dir);
+    if (Files.exists(path_to_check)) {
+        throw new Exception("The output directory ${path_to_check} already exists.\n
+        If you want to overwrite the contents of this directory, please provide the --overwrite flag.\n 
+        Alternatively provide --iteration <int> and the output directories will automatically\n
+        be suffixed with '_<int>'.")
+    }
 }
 
 // Create a channel that is a tuple of the pair_id and the corresponding bam as output from the preprocessing workflow
 // The deduction of the pair_ids here is reliant on the bam files ending in ".merged.deduplicated.sorted.bam".
 // This will be the case if these bam files have been output from the pre_processing pipeline.
 // Alternatively the command line parameter bam_common_extension can be set to a different default string.
-Channel.fromFilePairs("${params.input_bam_directory}/*.bam{,.bai}").map{it -> [it[1][0].getName().replaceAll(params.bam_common_extension, ""), [it[1][0], it[1][1]]]}.into{gatk_haplotype_caller_gvcf_ch; make_bqsr_tables_bam_ch}
+Channel.fromFilePairs("${params.bam_input_dir}/*.bam{,.bai}").map{it -> [it[1][0].getName().replaceAll(params.bam_common_extension, ""), [it[1][0], it[1][1]]]}.into{gatk_haplotype_caller_gvcf_ch; make_bqsr_tables_bam_ch}
 
 // This scaffold list is created from the reference fasta and is used for the scatter-gather approach
 // used in vcf calling.
@@ -40,7 +54,7 @@ scaffold_list = {
 
 // START OF GATK HAPLOTYPE CALLING
 process index_dictionary_refgenome{
-    container 'broadinstitute/gatk:latest'
+    container 'broadinstitute/gatk:4.1.9.0'
 
     input:
     path ref_genome from params.ref_assembly_path
@@ -66,7 +80,7 @@ process index_dictionary_refgenome{
 // https://gatk.broadinstitute.org/hc/en-us/articles/360035531652-FASTA-Reference-genome-format
 process gatk_haplotype_caller_gvcf{
     tag {pair_id}
-    container 'broadinstitute/gatk:latest'
+    container 'broadinstitute/gatk:4.1.9.0'
     cpus params.gatk_haplotype_caller_cpus
     memory "24 GB"
 
@@ -87,7 +101,7 @@ process genomics_db_import{
     tag "${scaffold}"
     cpus 1
     memory "24 GB"
-    container 'broadinstitute/gatk:latest'
+    container 'broadinstitute/gatk:4.1.9.0'
 
     input:
     each scaffold from Channel.fromList(scaffold_list)
@@ -106,7 +120,7 @@ process genomics_db_import{
 // NB an alternative to passing int the ref_genome_fai and ref_genome_dict
 // is to pass the param to the actual path
 process GenotypeGVCFs{
-    container 'broadinstitute/gatk:latest'
+    container 'broadinstitute/gatk:4.1.9.0'
 	cpus 5
 	tag "${scaffold}"
 
@@ -127,7 +141,7 @@ process GenotypeGVCFs{
 
 process gather_vcfs_for_eval{
 	tag "GatherVcfs_for_eval"
-    container 'broadinstitute/gatk:latest'
+    container 'broadinstitute/gatk:4.1.9.0'
     publishDir gatk_output_vcf_publishDir, mode: 'copy'
 
     input:
@@ -187,7 +201,7 @@ process rtg_vcfstats_per_sample{
 
 process rtg_vcfstats_summary{
     tag "rtg_vcfstats_summary"
-    container 'broadinstitute/gatk:latest'
+    container 'broadinstitute/gatk:4.1.9.0'
     publishDir gatk_vcf_stats_publishDir
 
     input:
