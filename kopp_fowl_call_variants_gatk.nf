@@ -9,23 +9,25 @@ This workflow outputs summary metrics of the produced multi-sample vcf files (b)
 running BQSR (e.g. by comparing Ti/Tv ratios or number of SNPs).
 */
 
+bin_dir = "${workflow.launchDir}/bin"
+
 if (params.subsample){
     params.output_dir = "${workflow.launchDir}/outputs_sub_sampled/"
-    gatk_per_scaffold_vcf_publishDir = [params.output_dir, "gvcfs_sub_${params.subsample_depth}"].join(File.separator)
+    gatk_per_scaffold_vcf_publishDir = [params.output_dir, "gatk_scaffold_vcfs_sub_${params.subsample_depth}"].join(File.separator)
     gatk_output_vcf_publishDir = [params.output_dir, "gatk_output_variants_sub_${params.subsample_depth}"].join(File.separator)
-    gatk_vcf_stats_publishDir = [params.output_dir, "vcf_stats_sub_${params.subsample_depth}"].join(File.separator)
+    gatk_vcf_stats_publishDir = [params.output_dir, "gatk_vcf_stats_sub_${params.subsample_depth}"].join(File.separator)
 }else{
     params.output_dir = "${workflow.launchDir}/outputs"
-    gatk_per_scaffold_vcf_publishDir = [params.output_dir, "gvcfs_GVCFs"].join(File.separator)
+    gatk_per_scaffold_vcf_publishDir = [params.output_dir, "gatk_scaffold_vcfs_GVCFs"].join(File.separator)
     gatk_output_vcf_publishDir = [params.output_dir, "gatk_output_variants"].join(File.separator)
-    gatk_vcf_stats_publishDir = [params.output_dir, "vcf_stats"].join(File.separator)
+    gatk_vcf_stats_publishDir = [params.output_dir, "gatk_vcf_stats"].join(File.separator)
 }
 
 // Create a channel that is a tuple of the pair_id and the corresponding bam as output from the preprocessing workflow
 // The deduction of the pair_ids here is reliant on the bam files ending in ".merged.deduplicated.sorted.bam".
 // This will be the case if these bam files have been output from the pre_processing pipeline.
 // Alternatively the command line parameter bam_common_extension can be set to a different default string.
-Channel.fromFilePairs("${params.input_bam_directory}/*.bam{,*.bai}").map{it -> [it[1][0].getName().replaceAll(params.bam_common_extension, ""), [it[1][0], it[1][1]]]}.into{gatk_haplotype_caller_gvcf_ch; make_bqsr_tables_bam_ch}
+Channel.fromFilePairs("${params.input_bam_directory}/*.bam{,.bai}").map{it -> [it[1][0].getName().replaceAll(params.bam_common_extension, ""), [it[1][0], it[1][1]]]}.into{gatk_haplotype_caller_gvcf_ch; make_bqsr_tables_bam_ch}
 
 // This scaffold list is created from the reference fasta and is used for the scatter-gather approach
 // used in vcf calling.
@@ -46,7 +48,7 @@ process index_dictionary_refgenome{
     path ref_genome from params.ref_assembly_path
 
     output:
-    tuple path(ref_genome), path("*.dict"), path("*.fai") into gatk_haplotype_caller_ref_genome_ch
+    tuple path(ref_genome), path("*.dict"), path("*.fai") into gatk_haplotype_caller_ref_genome_ch,GenotypeGVCFs_ref_genome_ch,bcftools_vcfstats_ref_genome_ch
 
     script:
     """
@@ -72,7 +74,7 @@ process gatk_haplotype_caller_gvcf{
 
     script:
     """
-    gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R ${params.ref_assembly_path} -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
+    gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R $ref_genome -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
     """
 }
 
@@ -94,7 +96,7 @@ process genomics_db_import{
     path(gvcf_tbi) from genomics_db_import_tbi_ch.collect{it[1]}
 	
 	output:
-    tuple val(scaffold), file("genomicsdbi.out.${scaffold}") into genotype_GVCFs_ch
+    tuple val(scaffold), path("genomicsdbi.out.${scaffold}") into genotype_GVCFs_ch
 	
     script:
 	"""
@@ -111,20 +113,16 @@ process GenotypeGVCFs{
 	publishDir gatk_per_scaffold_vcf_publishDir, mode: 'copy', pattern: '*.{vcf,idx}'
 
     input:
-	tuple val(scaffold), file(workspace) from genotype_GVCFs_ch
-   	path genome from params.ref_assembly_path
-    path ref_genome_fai from ref_assembly_fai_path
-    path ref_genome_dict from ref_assembly_dict_path
+	tuple val(scaffold), file(workspace), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from genotype_GVCFs_ch.combine(GenotypeGVCFs_ref_genome_ch)
 
 	output:
-    tuple val(scaffold), file("GenotypeGVCFs.out.${scaffold}.vcf"), file("GenotypeGVCFs.out.${scaffold}.vcf.idx") into hard_filter_ch
     file("GenotypeGVCFs.out.${scaffold}.vcf") into gather_vcfs_for_eval_ch
     file("GenotypeGVCFs.out.${scaffold}.vcf.idx") into gather_vcfs_idx_for_eval_ch
 
     script:
 	"""
     WORKSPACE=\$( basename ${workspace} )
-    gatk GenotypeGVCFs -R ${genome} -O GenotypeGVCFs.out.${scaffold}.vcf \
+    gatk GenotypeGVCFs -R ${ref_genome} -O GenotypeGVCFs.out.${scaffold}.vcf \
     --only-output-calls-starting-in-intervals -V gendb://\$WORKSPACE -L ${scaffold}
 	"""
 }
@@ -155,14 +153,14 @@ process bcftools_vcfstats{
     publishDir gatk_vcf_stats_publishDir
 
     input:
-    tuple path(vcf), path(vcf_idx) from bcftools_stats_ch
+    tuple path(vcf), path(vcf_idx), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from bcftools_stats_ch.combine(bcftools_vcfstats_ref_genome_ch)
 
     output:
     path("bcftools.stats.txt") into bcftools_stats_out_ch
 
     script:
     """
-    bcftools stats -F ${params.ref_assembly_path} -s - $vcf > bcftools.stats.txt
+    bcftools stats -F $ref_genome -s - $vcf > bcftools.stats.txt
     """
 }
 
