@@ -247,7 +247,7 @@ process nextgenmap_mapping{
 
 process merge_paired_and_unpaired{
     tag "${pair_id}"
-    container 'broadinstitute/gatk:4.1.9.0'
+    container 'broadinstitute/gatk:4.2.0.0'
     cpus 1
     memory '24 GB'
 
@@ -266,7 +266,7 @@ process merge_paired_and_unpaired{
 
 process add_read_group_headers{
     tag "${pair_id}"
-    container 'broadinstitute/gatk:4.1.9.0'
+    container 'broadinstitute/gatk:4.2.0.0'
     cpus 1
     memory '24 GB'
 
@@ -284,7 +284,7 @@ process add_read_group_headers{
 
 process markduplicates_spark{
     tag "${pair_id}"
-    container 'broadinstitute/gatk:4.1.9.0'
+    container 'broadinstitute/gatk:4.2.0.0'
     publishDir markduplicates_metrics_publishDir, pattern: "*.metrics.txt", mode: 'move'
     publishDir output_bam_publishDir, pattern: "*.bam{,.bai}", mode: 'copy'
     cpus 4
@@ -308,7 +308,7 @@ process markduplicates_spark{
 process collect_gc_bias_metrics{
     tag pair_id
     publishDir collect_gc_bias_metrics_publishDir, mode: 'copy'
-    container 'broadinstitute/gatk:4.1.9.0'
+    container 'broadinstitute/gatk:4.2.0.0'
 
     input:
     tuple val(pair_id), path(merged) from collect_gc_bias_metrics_ch

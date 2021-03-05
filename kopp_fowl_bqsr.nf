@@ -72,7 +72,7 @@ scaffold_list = {
 // Good reference for the nextflow coding: https://github.com/IARCbioinfo/gatk4-GenotypeGVCFs-nf/blob/master/gatk4-GenotypeGVCFs.nf
 
 process index_dictionary_refgenome{
-    container "broadinstitute/gatk:4.1.9.0"
+    container "broadinstitute/gatk:4.2.0.0"
     
     input:
     path ref_genome from params.ref_assembly_path
@@ -95,12 +95,12 @@ if (!params.vcf_input_path){
     // This will be the case if these bam files have been output from the pre_processing pipeline.
     // Alternatively the command line parameter bam_common_extension can be set to a different default string.
     Channel.fromFilePairs("${params.bam_input_dir}/*.bam{,.bai}").map{it -> [it[1][0].getName().replaceAll(params.bam_common_extension, ""), [it[1][0], it[1][1]]]}.into{gatk_haplotype_caller_gvcf_ch; make_bqsr_tables_bam_ch}
-    
+    gatk_haplotype_caller_gvcf_ch.view()
     // // NB HaplotypCaller requires a .fai
     // // https://gatk.broadinstitute.org/hc/en-us/articles/360035531652-FASTA-Reference-genome-format
     // process gatk_haplotype_caller_gvcf{
     //     tag {pair_id}
-    //     container 'broadinstitute/gatk:4.1.9.0'
+    //     container 'broadinstitute/gatk:4.2.0.0'
     //     cpus params.gatk_haplotype_caller_cpus
     //     memory "24 GB"
 
@@ -121,7 +121,7 @@ if (!params.vcf_input_path){
     //     tag "${scaffold}"
     //     cpus 1
     //     memory "24 GB"
-    //     container 'broadinstitute/gatk:4.1.9.0'
+    //     container 'broadinstitute/gatk:4.2.0.0'
 
     //     input:
     //     each scaffold from Channel.fromList(scaffold_list)
@@ -138,10 +138,9 @@ if (!params.vcf_input_path){
     // }
 
     // process GenotypeGVCFs{
-    //     container 'broadinstitute/gatk:4.1.9.0'
+    //     container 'broadinstitute/gatk:4.2.0.0'
     //     cpus 5
     //     tag "${scaffold}"
-    //     publishDir gatk_per_scaffold_vcf_publishDir, mode: 'copy', pattern: '*.{vcf,idx}'
 
     //     input:
     //     tuple val(scaffold), file(workspace), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from genotype_GVCFs_ch.combine(GenotypeGVCFs_ref_genome_ch)
@@ -170,7 +169,7 @@ if (!params.vcf_input_path){
         tag {scaffold}
         cpus 1
         memory "24GB"
-        container 'broadinstitute/gatk:4.1.9.0'
+        container 'broadinstitute/gatk:4.2.0.0'
 
         input:
         each scaffold from Channel.fromList(scaffold_list)
@@ -191,7 +190,7 @@ if (!params.vcf_input_path){
 
 process hard_filter{
 	tag {scaffold}
-    container 'broadinstitute/gatk:4.1.9.0'
+    container 'broadinstitute/gatk:4.2.0.0'
     cpus 5
 
     input:
@@ -222,7 +221,7 @@ process hard_filter{
 // // NB GatherVcfs must be provided with the vcf files in order of the scaffolds. We do this using the scaffhold_list.
 process gather_vcfs{
 	tag "GatherVcfs"
-    container 'broadinstitute/gatk:4.1.9.0'
+    container 'broadinstitute/gatk:4.2.0.0'
 
     input:
     val(scaffolds) from Channel.fromList(scaffold_list).collect()
@@ -245,7 +244,7 @@ process gather_vcfs{
 // // make_bqsr_tables_known_variants_ch.view()
 process make_bqsr_tables{
     tag {pair_id}
-    container 'broadinstitute/gatk:4.1.9.0'
+    container 'broadinstitute/gatk:4.2.0.0'
 
     input:
     tuple val(pair_id), path(merged_bam), path(known_variants), path(known_variants_idx), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from make_bqsr_tables_bam_ch.combine(make_bqsr_tables_known_variants_ch).combine(make_bqsr_tables_ref_genome_ch)
@@ -289,7 +288,7 @@ process apply_bqsr_tables{
 
 process make_bqsr_tables_round_2{
     tag {pair_id}
-    container 'broadinstitute/gatk:4.1.9.0'
+    container 'broadinstitute/gatk:4.2.0.0'
 
     input:
     tuple val(pair_id), path(merged_bam), path(known_variants), path(known_variants_idx), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from apply_bqsr_tables_round_2_ch.combine(make_bqsr_tables_known_variants_round_2_ch).combine(make_bqsr_tables_ref_genome_round_2_ch)
@@ -306,7 +305,7 @@ process make_bqsr_tables_round_2{
 
 process AnalyzeCovariates{
     tag {pair_id}
-    container 'broadinstitute/gatk:4.1.9.0'
+    container 'broadinstitute/gatk:4.2.0.0'
     publishDir gatk_bqsr_analyze_covariates_publishDir
 
     input:

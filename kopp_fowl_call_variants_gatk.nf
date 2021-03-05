@@ -26,12 +26,12 @@ if (params.subsample){
 // accidentally overwrite the files. We will only do this check if overwrite is false.
 if(!params.overwrite){
     // Check to see if each of the output dirs already exist
-    Path path_to_check = Paths.get(params.output_dir);
-    if (Files.exists(path_to_check)) {
-        throw new Exception("The output directory ${path_to_check} already exists.\n
-        If you want to overwrite the contents of this directory, please provide the --overwrite flag.\n 
+    def path_to_check = new File(params.output_dir);
+    if (path_to_check.exists()) {
+        throw new Exception("""The output directory ${path_to_check} already exists.\n
+        If you want to overwrite the contents of this directory, please provide the --overwrite flag.\n
         Alternatively provide --iteration <int> and the output directories will automatically\n
-        be suffixed with '_<int>'.")
+        be suffixed with '_<int>'.""")
     }
 }
 
@@ -54,7 +54,7 @@ scaffold_list = {
 
 // START OF GATK HAPLOTYPE CALLING
 process index_dictionary_refgenome{
-    container 'broadinstitute/gatk:4.1.9.0'
+    container 'broadinstitute/gatk:4.2.0.0'
 
     input:
     path ref_genome from params.ref_assembly_path
@@ -80,7 +80,7 @@ process index_dictionary_refgenome{
 // https://gatk.broadinstitute.org/hc/en-us/articles/360035531652-FASTA-Reference-genome-format
 process gatk_haplotype_caller_gvcf{
     tag {pair_id}
-    container 'broadinstitute/gatk:4.1.9.0'
+    container 'broadinstitute/gatk:4.2.0.0'
     cpus params.gatk_haplotype_caller_cpus
     memory "24 GB"
 
@@ -101,7 +101,7 @@ process genomics_db_import{
     tag "${scaffold}"
     cpus 1
     memory "24 GB"
-    container 'broadinstitute/gatk:4.1.9.0'
+    container 'broadinstitute/gatk:4.2.0.0'
 
     input:
     each scaffold from Channel.fromList(scaffold_list)
@@ -120,7 +120,7 @@ process genomics_db_import{
 // NB an alternative to passing int the ref_genome_fai and ref_genome_dict
 // is to pass the param to the actual path
 process GenotypeGVCFs{
-    container 'broadinstitute/gatk:4.1.9.0'
+    container 'broadinstitute/gatk:4.2.0.0'
 	cpus 5
 	tag "${scaffold}"
 
@@ -141,7 +141,7 @@ process GenotypeGVCFs{
 
 process gather_vcfs_for_eval{
 	tag "GatherVcfs_for_eval"
-    container 'broadinstitute/gatk:4.1.9.0'
+    container 'broadinstitute/gatk:4.2.0.0'
     publishDir gatk_output_vcf_publishDir, mode: 'copy'
 
     input:
@@ -201,7 +201,7 @@ process rtg_vcfstats_per_sample{
 
 process rtg_vcfstats_summary{
     tag "rtg_vcfstats_summary"
-    container 'broadinstitute/gatk:4.1.9.0'
+    container 'broadinstitute/gatk:4.2.0.0'
     publishDir gatk_vcf_stats_publishDir
 
     input:
