@@ -40,7 +40,7 @@ if(!params.overwrite){
         throw new Exception("""The output directory ${path_to_check} already exists.\n
         If you want to overwrite the contents of this directory, please provide the --overwrite flag.\n
         Alternatively provide --iteration <int> and the output directories will automatically\n
-        be suffixed with '_<int>'.""")
+        be suffixed with '_<int>', or provide your own output directory with --output_dir <path/to/dir>.""")
     }
 }
 
@@ -94,67 +94,101 @@ if (!params.vcf_input_path){
     // The deduction of the pair_ids here is reliant on the bam files ending in ".merged.deduplicated.sorted.bam".
     // This will be the case if these bam files have been output from the pre_processing pipeline.
     // Alternatively the command line parameter bam_common_extension can be set to a different default string.
-    Channel.fromFilePairs("${params.bam_input_dir}/*.bam{,.bai}").map{it -> [it[1][0].getName().replaceAll(params.bam_common_extension, ""), [it[1][0], it[1][1]]]}.into{gatk_haplotype_caller_gvcf_ch; make_bqsr_tables_bam_ch}
-    gatk_haplotype_caller_gvcf_ch.view()
+    
+    // We will generate the group name by removing all parts of the file name that are found in common between all samples.
+    Channel.fromFilePairs("${params.bam_input_dir}/*.bam{,.bai}").toList().flatMap{
+        list_of_bams -> 
+        println("This is the list_of_bams: ${list_of_bams}")
+        def group_list = [];
+        // For each of the bam sets, pull out the current group name and put it into the group_list
+        list_of_bams.eachWithIndex{ bam_set, i -> group_list << bam_set[0];}
+        println("This is the group_list: ${group_list}" )
+        // Then work backwards on a per character basis checking to see if the character is found in common
+        // for all samples. If it is then this will be a character to discard. Keep going until
+        // we find a character that is not in common across all names and make a note of the index position.
+        // We will then return the group ids with this number of characters discarded
+        def cut_index = 0;
+        def exit = false;
+        for (i = 1; !exit; i++) {
+            // For each character starting from the last
+            start_char = group_list[0].charAt(group_list[0].length() - i)
+            println("Start char is currently: ${start_char}")
+            group_list.eachWithIndex{
+                group_name, j -> 
+                    if (group_name.charAt(group_name.length() - i) != start_char){
+                        // Then j is the index to start cutting from
+                        cut_index = -1 * i;
+                        println("Look we got here and the cut index is: ${cut_index}")
+                        exit = true;
+                    }
+                }
+        }
+        // Now that we have the cut index we can cut each of the group names
+        // At this point we want to create a new list and return it
+        def output_list = [];
+        list_of_bams.eachWithIndex{bam_set, i -> output_list << [bam_set[0][0..cut_index], bam_set[1] ];}
+        return output_list;
+    }.into{gatk_haplotype_caller_gvcf_ch; make_bqsr_tables_bam_ch}
+    
     // // NB HaplotypCaller requires a .fai
     // // https://gatk.broadinstitute.org/hc/en-us/articles/360035531652-FASTA-Reference-genome-format
-    // process gatk_haplotype_caller_gvcf{
-    //     tag {pair_id}
-    //     container 'broadinstitute/gatk:4.2.0.0'
-    //     cpus params.gatk_haplotype_caller_cpus
-    //     memory "24 GB"
+    process gatk_haplotype_caller_gvcf{
+        tag {pair_id}
+        container 'broadinstitute/gatk:4.2.0.0'
+        cpus params.gatk_haplotype_caller_cpus
+        memory "24 GB"
 
-    //     input:
-    //     tuple val(pair_id), path(merged), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from gatk_haplotype_caller_gvcf_ch.combine(gatk_haplotype_caller_ref_genome_ch)
+        input:
+        tuple val(pair_id), path(merged), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from gatk_haplotype_caller_gvcf_ch.combine(gatk_haplotype_caller_ref_genome_ch)
 
-    //     output:
-    //     tuple val(pair_id), path("${pair_id}.merged.g.vcf.gz") into genomics_db_import_ch
-    //     tuple val(pair_id), path("${pair_id}.merged.g.vcf.gz.tbi") into genomics_db_import_tbi_ch
+        output:
+        tuple val(pair_id), path("${pair_id}.merged.g.vcf.gz") into genomics_db_import_ch
+        tuple val(pair_id), path("${pair_id}.merged.g.vcf.gz.tbi") into genomics_db_import_tbi_ch
 
-    //     script:
-    //     """
-    //     gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R $ref_genome -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
-    //     """
-    // }
+        script:
+        """
+        gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R $ref_genome -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
+        """
+    }
 
-    // process genomics_db_import{
-    //     tag "${scaffold}"
-    //     cpus 1
-    //     memory "24 GB"
-    //     container 'broadinstitute/gatk:4.2.0.0'
+    process genomics_db_import{
+        tag "${scaffold}"
+        cpus 1
+        memory "24 GB"
+        container 'broadinstitute/gatk:4.2.0.0'
 
-    //     input:
-    //     each scaffold from Channel.fromList(scaffold_list)
-    //     path(gvcf) from genomics_db_import_ch.collect{it[1]}
-    //     path(gvcf_tbi) from genomics_db_import_tbi_ch.collect{it[1]}
+        input:
+        each scaffold from Channel.fromList(scaffold_list)
+        path(gvcf) from genomics_db_import_ch.collect{it[1]}
+        path(gvcf_tbi) from genomics_db_import_tbi_ch.collect{it[1]}
         
-    //     output:
-    //     tuple val(scaffold), file("genomicsdbi.out.${scaffold}") into genotype_GVCFs_ch
+        output:
+        tuple val(scaffold), file("genomicsdbi.out.${scaffold}") into genotype_GVCFs_ch
         
-    //     script:
-    //     """
-    //     gatk  --java-options '-DGATK_STACKTRACE_ON_USER_EXCEPTION=true' GenomicsDBImport ${gvcf.collect { "-V $it " }.join()} --genomicsdb-workspace-path genomicsdbi.out.${scaffold} -L $scaffold --batch-size 50
-    //     """
-    // }
+        script:
+        """
+        gatk  --java-options '-DGATK_STACKTRACE_ON_USER_EXCEPTION=true' GenomicsDBImport ${gvcf.collect { "-V $it " }.join()} --genomicsdb-workspace-path genomicsdbi.out.${scaffold} -L $scaffold --batch-size 50
+        """
+    }
 
-    // process GenotypeGVCFs{
-    //     container 'broadinstitute/gatk:4.2.0.0'
-    //     cpus 5
-    //     tag "${scaffold}"
+    process GenotypeGVCFs{
+        container 'broadinstitute/gatk:4.2.0.0'
+        cpus 5
+        tag "${scaffold}"
 
-    //     input:
-    //     tuple val(scaffold), file(workspace), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from genotype_GVCFs_ch.combine(GenotypeGVCFs_ref_genome_ch)
+        input:
+        tuple val(scaffold), file(workspace), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from genotype_GVCFs_ch.combine(GenotypeGVCFs_ref_genome_ch)
 
-    //     output:
-    //     tuple val(scaffold), file("GenotypeGVCFs.out.${scaffold}.vcf"), file("GenotypeGVCFs.out.${scaffold}.vcf.idx") into hard_filter_ch
+        output:
+        tuple val(scaffold), file("GenotypeGVCFs.out.${scaffold}.vcf"), file("GenotypeGVCFs.out.${scaffold}.vcf.idx") into hard_filter_ch
 
-    //     script:
-    //     """
-    //     WORKSPACE=\$( basename ${workspace} )
-    //     gatk GenotypeGVCFs -R ${ref_genome} -O GenotypeGVCFs.out.${scaffold}.vcf \
-    //     --only-output-calls-starting-in-intervals -V gendb://\$WORKSPACE -L ${scaffold}
-    //     """
-    // }
+        script:
+        """
+        WORKSPACE=\$( basename ${workspace} )
+        gatk GenotypeGVCFs -R ${ref_genome} -O GenotypeGVCFs.out.${scaffold}.vcf \
+        --only-output-calls-starting-in-intervals -V gendb://\$WORKSPACE -L ${scaffold}
+        """
+    }
 
 }else{
     // Then we have been provided with a vcf to hard filter from.
@@ -264,7 +298,7 @@ process make_bqsr_tables{
 process apply_bqsr_tables{
     tag {pair_id}
     container 'broadinstitute/gatk:4.2.0.0'
-    publishDir gatk_bqsr_bam_publishDir
+    publishDir gatk_bqsr_bam_publishDir, mode: copy
 
     input:
     tuple val(pair_id), path(merged_bam), path(table), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from apply_bqsr_tables_ch.combine(apply_bqsr_tables_ref_genome_ch)

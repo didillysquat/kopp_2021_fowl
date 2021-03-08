@@ -39,7 +39,39 @@ if(!params.overwrite){
 // The deduction of the pair_ids here is reliant on the bam files ending in ".merged.deduplicated.sorted.bam".
 // This will be the case if these bam files have been output from the pre_processing pipeline.
 // Alternatively the command line parameter bam_common_extension can be set to a different default string.
-Channel.fromFilePairs("${params.bam_input_dir}/*.bam{,.bai}").map{it -> [it[1][0].getName().replaceAll(params.bam_common_extension, ""), [it[1][0], it[1][1]]]}.into{gatk_haplotype_caller_gvcf_ch; make_bqsr_tables_bam_ch}
+Channel.fromFilePairs("${params.bam_input_dir}/*.bam{,.bai}").toList().flatMap{
+        list_of_bams -> 
+        
+        def group_list = [];
+        // For each of the bam sets, pull out the current group name and put it into the group_list
+        list_of_bams.eachWithIndex{ bam_set, i -> group_list << bam_set[0];}
+        
+        // Then work backwards on a per character basis checking to see if the character is found in common
+        // for all samples. If it is then this will be a character to discard. Keep going until
+        // we find a character that is not in common across all names and make a note of the index position.
+        // We will then return the group ids with this number of characters discarded
+        def cut_index = 0;
+        def exit = false;
+        for (i = 1; !exit; i++) {
+            // For each character starting from the last
+            start_char = group_list[0].charAt(group_list[0].length() - i)
+            
+            group_list.eachWithIndex{
+                group_name, j -> 
+                    if (group_name.charAt(group_name.length() - i) != start_char){
+                        // Then j is the index to start cutting from
+                        cut_index = -1 * i;
+                        
+                        exit = true;
+                    }
+                }
+        }
+        // Now that we have the cut index we can cut each of the group names
+        // At this point we want to create a new list and return it
+        def output_list = [];
+        list_of_bams.eachWithIndex{bam_set, i -> output_list << [bam_set[0][0..cut_index], bam_set[1] ];}
+        return output_list;
+    }.into{gatk_haplotype_caller_gvcf_ch; make_bqsr_tables_bam_ch}
 
 // This scaffold list is created from the reference fasta and is used for the scatter-gather approach
 // used in vcf calling.
