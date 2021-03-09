@@ -194,7 +194,7 @@ if (!params.vcf_input_path){
     // Then we have been provided with a vcf to hard filter from.
     // Can skip HaplotypeCaller, GenomicsDBImport and GenotypeGVCFs
     // Need to split the provided vcf by haplotype to pass into hard filtering
-    // Output of the process neds to be a channel of tuples of the scaffold name, the vcf and the vcf.idx
+    // Output of the process needs to be a channel of tuples of the scaffold name, the vcf and the vcf.idx
     make_bqsr_tables_bam_ch = Channel.fromFilePairs("${params.bam_input_dir}/*.bam{,.bai}").map{it -> [it[1][0].getName().replaceAll(params.bam_common_extension, ""), [it[1][0], it[1][1]]]}
     split_vcf_by_scaffold_vcf_ch = Channel.fromPath(params.vcf_input_path)
     split_vcf_by_scaffold_vcf_idx_ch = Channel.fromPath("${params.vcf_input_path}.idx")
