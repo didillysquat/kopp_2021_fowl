@@ -1,5 +1,28 @@
 #!/usr/bin/env nextflow
 
+/*
+    Pipeline to assess relatedness of non-model organism samples through
+    shallow whole genome sequencing.
+
+    Copyright (C) 2021  Benjamin C. C. Hume
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+    Author: Benjamin C. C. Hume
+    Contact: didillysquat@gmail.com
+*/
+
 // Check that the ref genome is decompressed
 if (params.ref_assembly_path.endsWith(".bgz") || params.ref_assembly_path.endsWith(".gz") || params.ref_assembly_path.endsWith(".zip")){
     throw new Exception("The reference assembly genome must be decompressed and in fasta format (.fna, .fa, .fasta). Currently the reference genome path is set to ${params.ref_assembly_path}")
