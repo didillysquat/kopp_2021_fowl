@@ -294,7 +294,7 @@ process add_read_group_headers{
 process markduplicates_spark{
     tag "${pair_id}"
     container 'broadinstitute/gatk:4.2.0.0'
-    publishDir markduplicates_metrics_publishDir, pattern: "*.metrics.txt", mode: 'move'
+    publishDir markduplicates_metrics_publishDir, pattern: "*.metrics.txt", mode: 'copy'
     publishDir output_bam_publishDir, pattern: "*.bam{,.bai}", mode: 'copy'
     cpus 4
     memory "24 GB"
@@ -387,7 +387,7 @@ process mosdepth_sequencing_coverage{
 process mosdepth_plot_seq_coverage{
     tag pair_id
     publishDir mosdepth_sequencing_coverage_publishDir, mode: 'copy'
-    conda "${envs_dir}/python3.yaml"
+    container "quay.io/biocontainers/python:3.8.3"
     cpus 1
 
     input:
