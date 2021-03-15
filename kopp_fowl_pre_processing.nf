@@ -45,7 +45,10 @@ scaffold_list = {
 
 Channel.fromList(scaffold_list).into{scaffold_list_ch; scaffold_list_gather_vcfs_ch}
 
-read_group_map = { 
+// This method makes read_group_map that is a list of tuples where the first element is the pair_id
+// and the second is the string that is used by AddOrReplaceReadGroups.
+
+(read_group_map, num_samples) = { 
     def tup_list = []
     def pair_id_list = []
     new File(params.read_info_file).eachLine {  
@@ -74,9 +77,8 @@ read_group_map = {
             }
         }
     }
-    return tup_list     
+    return [tup_list, pair_id_list.size]
 }()
-
 
 // Publish dirs
 if (params.subsample){
@@ -108,13 +110,17 @@ files into the trimming and fastqc
 Modify the pair name to indicate subsampled files. This way it will carry through the remainder of the anlysis.
 if not subsample, then create channel directly from the raw sequencing files
 */
+// NB the containerOoptions are required when using the docker profile to prevent permission errors
+// They are not required when running a singularity profile.
 if (params.subsample){
     ch_subsample = Channel.fromFilePairs("${params.raw_reads_dir}/*R{1,2}*.fastq.gz")    
     process subsample{
         tag "${pair_id}"
         cache 'lenient'
         container 'biocontainers/seqtk:v1.3-1-deb_cv1'
-        containerOptions '-u $(id -u):$(id -g)'
+        if (workflow.containerEngine == 'docker'){
+            containerOptions '-u $(id -u):$(id -g)'
+        }
         publishDir "${params.output_dir}/${params.subsample_depth}_subsampled_reads", mode: 'copy'
         cpus 1
 
@@ -139,8 +145,7 @@ if (params.subsample){
 
 process fastqc_pre_trim{
     tag "${pair_id}"
-    container 'trinityrnaseq/trinityrnaseq:latest'
-    containerOptions '-u $(id -u):$(id -g)'
+    container 'biocontainers/fastqc:v0.11.9_cv7'
     publishDir fastqc_pre_trim_publish_dir, mode: 'copy'
     cpus 1
 
@@ -162,9 +167,10 @@ process trimmomatic{
     cache 'lenient'
 	tag "${pair_id}"
     container 'davelabhub/trimmomatic:0.39--1'
-    containerOptions '-u $(id -u):$(id -g)'
+    if (workflow.containerEngine == 'docker'){
+            containerOptions '-u $(id -u):$(id -g)'
+        }
     cpus params.trimmomatic_threads
-    memory '24 GB'
 	
 	input:
 	tuple val(pair_id), file(fastqs) from ch_trimmomatic_input
@@ -185,11 +191,9 @@ process trimmomatic{
 
 process fastqc_post_trim{
     tag "${pair_id}"
-    container 'trinityrnaseq/trinityrnaseq:latest'
-    containerOptions '-u $(id -u):$(id -g)'
+    container 'biocontainers/fastqc:v0.11.9_cv7'
     publishDir fastqc_post_trim_publish_dir, mode: 'copy'
     cpus 1
-    memory '24 GB'
 
     input:
     tuple val(pair_id), file(paired_files), file(unpaired_files) from ch_fastqc_post_trim_paired.join(ch_fastqc_post_trim_unpaired)
@@ -219,7 +223,6 @@ process fastqc_post_trim{
 process nextgenmap_indexing{
     conda 'envs/ngm.yaml'
     cpus params.nextgenmap_threads
-    memory '24 GB'
 
     input:
     path ref_genome from params.ref_assembly_path
@@ -237,7 +240,6 @@ process nextgenmap_mapping{
     tag "${pair_id}"
     conda 'envs/ngm.yaml'
     cpus params.nextgenmap_threads
-    memory '24 GB'
 
     input:
 	tuple val(pair_id), file(paired), file(unpaired), path(ref_genome), path(ref_genome_indices) from ch_ngm_paired.join(ch_ngm_unpaired).combine(ngm_index_ch)
@@ -258,7 +260,6 @@ process merge_paired_and_unpaired{
     tag "${pair_id}"
     container 'broadinstitute/gatk:4.2.0.0'
     cpus 1
-    memory '24 GB'
 
     input:
     tuple val(pair_id), file(paired), file(unpaired_one), file(unpaired_two) from add_read_group_headers_ch
@@ -277,7 +278,6 @@ process add_read_group_headers{
     tag "${pair_id}"
     container 'broadinstitute/gatk:4.2.0.0'
     cpus 1
-    memory '24 GB'
 
     input:
     tuple val(pair_id), file(merged), val(read_group_string) from read_groups_merged_ch.join(Channel.fromList(read_group_map))
@@ -291,13 +291,15 @@ process add_read_group_headers{
     """
 }
 
+// NB when running a singularity profile we get errors relating to port number conflicts.
+// To prevent this we set spark.port.maxRetries to be the number of samples
+// This does not appear to be an issue when running a docker profile.
 process markduplicates_spark{
     tag "${pair_id}"
     container 'broadinstitute/gatk:4.2.0.0'
     publishDir markduplicates_metrics_publishDir, pattern: "*.metrics.txt", mode: 'copy'
     publishDir output_bam_publishDir, pattern: "*.bam{,.bai}", mode: 'copy'
     cpus 4
-    memory "24 GB"
 
     input:
     tuple val(pair_id), file(merged) from mark_duplicates_ch
@@ -308,7 +310,7 @@ process markduplicates_spark{
 
     script:
     """
-    gatk MarkDuplicatesSpark --create-output-bam-index --remove-sequencing-duplicates -I ${merged} -O ${pair_id}.merged.deduplicated.sorted.bam -M ${pair_id}.merged.deduplicated.sorted.metrics.txt
+    gatk MarkDuplicatesSpark --create-output-bam-index --remove-sequencing-duplicates -I ${merged} -O ${pair_id}.merged.deduplicated.sorted.bam -M ${pair_id}.merged.deduplicated.sorted.metrics.txt --conf 'spark.port.maxRetries=${num_samples}'
     """
 }
 // END OF PRE PROCESSING
