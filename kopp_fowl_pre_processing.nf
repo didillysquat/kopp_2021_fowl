@@ -143,9 +143,10 @@ if (params.subsample){
     Channel.fromFilePairs("${params.raw_reads_dir}/*_{1,2}.fastq.gz").into{ch_fastqc_pre_trim; ch_trimmomatic_input}
 }
 
+// NB the biocontainers container biocontainers/fastqc:v0.11.9_cv7 does not work on BINAC.
 process fastqc_pre_trim{
     tag "${pair_id}"
-    container 'biocontainers/fastqc:v0.11.9_cv7'
+    container 'singlecellpipeline/fastqc:v0.0.2'
     publishDir fastqc_pre_trim_publish_dir, mode: 'copy'
     cpus 1
 
@@ -189,9 +190,10 @@ process trimmomatic{
 	"""
 }
 
+// NB the biocontainers container biocontainers/fastqc:v0.11.9_cv7 does not work on BINAC.
 process fastqc_post_trim{
     tag "${pair_id}"
-    container 'biocontainers/fastqc:v0.11.9_cv7'
+    container 'singlecellpipeline/fastqc:v0.0.2'
     publishDir fastqc_post_trim_publish_dir, mode: 'copy'
     cpus 1
 
