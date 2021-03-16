@@ -222,41 +222,103 @@ process fastqc_post_trim{
 // and we need to channel these appropriately into any process that wants to use them.
 // The former relies on the params.ref_assembly_path being accessibly by next flow (i.e. below the root directory)
 // of the project. The latter method does not. As such we will go with the latter.
-process nextgenmap_indexing{
-    conda 'envs/ngm.yaml'
-    cpus params.nextgenmap_threads
+if (params.mapping == "ngm"){
+    process nextgenmap_indexing{
+        conda 'envs/ngm.yaml'
+        cpus params.nextgenmap_threads
 
-    input:
-    path ref_genome from params.ref_assembly_path
+        input:
+        path ref_genome from params.ref_assembly_path
 
-    output:
-    tuple path(ref_genome), path("*.ngm") into ngm_index_ch
+        output:
+        tuple path(ref_genome), path("*.ngm") into ngm_index_ch
 
-    script:
-    """
-    ngm -t ${task.cpus} -r ${ref_genome}
-    """
+        script:
+        """
+        ngm -t ${task.cpus} -r ${ref_genome}
+        """
+    }
+
+    process nextgenmap_mapping{
+        tag "${pair_id}"
+        conda 'envs/ngm.yaml'
+        cpus params.nextgenmap_threads
+
+        input:
+        tuple val(pair_id), file(paired), file(unpaired), path(ref_genome), path(ref_genome_indices) from ch_ngm_paired.join(ch_ngm_unpaired).combine(ngm_index_ch)
+
+        output:
+        tuple val(pair_id), file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam") into add_read_group_headers_ch
+
+        script:
+        """
+        ngm -t ${task.cpus} -r ${ref_genome} -1 ${paired[0]} -2 ${paired[1]} -o ${pair_id}_P_mapped.sam;
+        ngm -t ${task.cpus} -r ${ref_genome} -q ${unpaired[0]} -o ${pair_id}_U1_mapped.sam;
+        ngm -t ${task.cpus} -r ${ref_genome} -q ${unpaired[1]} -o ${pair_id}_U2_mapped.sam;
+        """
+    }
+}else{
+    process bwa_indexing{
+        container 'biocontainers/bwa:v0.7.17_cv1'
+        if (workflow.containerEngine == 'docker'){
+            containerOptions '-u $(id -u):$(id -g)'
+        }
+        cpus params.nextgenmap_threads
+
+        input:
+        path ref_genome from params.ref_assembly_path
+
+        output:
+        tuple path(ref_genome), path("*{.sa,.amb,.ann,.pac,.bwt}") into ngm_index_ch
+
+        script:
+        """
+        bwa index ${ref_genome}
+        """
+    }
+
+    process bwa_mapping{
+        tag "${pair_id}"
+        container 'biocontainers/bwa:v0.7.17_cv1'
+        if (workflow.containerEngine == 'docker'){
+            containerOptions '-u $(id -u):$(id -g)'
+        }
+        cpus params.nextgenmap_threads
+
+        input:
+        tuple val(pair_id), file(paired), file(unpaired), path(ref_genome), path(ref_genome_indices) from ch_ngm_paired.join(ch_ngm_unpaired).combine(ngm_index_ch)
+
+        output:
+        tuple val(pair_id), file("${pair_id}_P_mapped.unsorted.sam"), file("${pair_id}_U1_mapped.unsorted.sam"), file("${pair_id}_U2_mapped.unsorted.sam") into samtools_sort_ch
+
+        script:
+        """
+        bwa mem -t ${task.cpus} ${ref_genome} ${paired[0]} ${paired[1]} > ${pair_id}_P_mapped.unsorted.sam;
+        bwa mem -t ${task.cpus} ${ref_genome} ${unpaired[0]} > ${pair_id}_U1_mapped.unsorted.sam;
+        bwa mem -t ${task.cpus} ${ref_genome} ${unpaired[1]} > ${pair_id}_U2_mapped.unsorted.sam;
+        """
+    }
+
+    // --threads is the number of additional threads to use (hence the -1)
+    process samtools_sort{
+        tag "${pair_id}"
+        container 'singlecellpipeline/samtools:v0.0.3'
+        cpus params.nextgenmap_threads
+
+        input:
+        tuple val(pair_id), file(paired), file(unpaired_1), path(unpaired_2) from samtools_sort_ch
+
+        output:
+        tuple val(pair_id), file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam") into add_read_group_headers_ch
+
+        script:
+        """
+        samtools sort --threads ${task.cpus - 1} ${paired} --output-fmt SAM > ${pair_id}_P_mapped.sam;
+        samtools sort --threads ${task.cpus - 1} ${unpaired_1} --output-fmt SAM > ${pair_id}_U1_mapped.sam;
+        samtools sort --threads ${task.cpus - 1} ${unpaired_2} --output-fmt SAM > ${pair_id}_U2_mapped.sam;
+        """
+    }
 }
-
-process nextgenmap_mapping{
-    tag "${pair_id}"
-    conda 'envs/ngm.yaml'
-    cpus params.nextgenmap_threads
-
-    input:
-	tuple val(pair_id), file(paired), file(unpaired), path(ref_genome), path(ref_genome_indices) from ch_ngm_paired.join(ch_ngm_unpaired).combine(ngm_index_ch)
-
-    output:
-    tuple val(pair_id), file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam") into add_read_group_headers_ch
-
-    script:
-    """
-    ngm -t ${task.cpus} -r ${params.ref_assembly_path} -1 ${paired[0]} -2 ${paired[1]} -o ${pair_id}_P_mapped.sam;
-    ngm -t ${task.cpus} -r ${params.ref_assembly_path} -q ${unpaired[0]} -o ${pair_id}_U1_mapped.sam;
-    ngm -t ${task.cpus} -r ${params.ref_assembly_path} -q ${unpaired[1]} -o ${pair_id}_U2_mapped.sam;
-    """
-}
-
 
 process merge_paired_and_unpaired{
     tag "${pair_id}"
