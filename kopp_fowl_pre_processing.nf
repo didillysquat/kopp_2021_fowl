@@ -84,15 +84,20 @@ make_indices_from_scratch = {
 // This method makes read_group_map that is a list of tuples where the first element is the pair_id
 // and the second is the string that is used by AddOrReplaceReadGroups.
 
-(read_group_map, num_samples) = { 
+(read_group_map, num_samples) = {
     def tup_list = []
     def pair_id_list = []
     new File(params.read_info_file).eachLine {  
         line ->
-        line_comp = line.tokenize('\t');
-        
+        line_comp = line.tokenize();
         // Skip the header line of the .tsv
         if (line_comp[0].endsWith(".gz")){            
+            // TODO check to see that the file exists and return error if it does not
+            def should_exist = new File("${params.raw_reads_dir}/${line_comp[0]}")
+            if (!should_exist.exists()){
+                throw new Exception("${should_exist} not found.")
+            }
+            
             // regex to get the pair_id
             def pattern = ~/^(?<pair>.*)_R[1-2].*$/
             def matcher = line_comp[0] =~ pattern
@@ -260,8 +265,8 @@ process fastqc_post_trim{
 // The former relies on the params.ref_assembly_path being accessibly by next flow (i.e. below the root directory)
 // of the project. The latter method does not. As such we will go with the latter.
 
-// TODO to speed up the indexing we should check to see if the indices already exist
-// and create a channel from them if so. Else do the indexing from scratch.
+// NB we check to see if the indexing files already exist and
+// make use of them if params.remake_indices if false
 if (params.mapping == "ngm"){
     if (make_indices_from_scratch){
         process nextgenmap_indexing{
@@ -304,7 +309,7 @@ if (params.mapping == "ngm"){
         """
     }
 }else{
-    // TODO check to see if the indice files already exist and if create the channel from this
+    // Check to see if the indice files already exist and if create the channel from this
     if (make_indices_from_scratch){
         process bwa_indexing{
             container 'biocontainers/bwa:v0.7.17_cv1'
