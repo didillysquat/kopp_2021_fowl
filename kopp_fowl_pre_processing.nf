@@ -402,7 +402,7 @@ process collect_gc_bias_metrics{
 
 
 process pcr_bottleneck_coefficient{
-    tag pair_id
+    tag "${pair_id}"
     publishDir pcr_bottleneck_coefficient_publishDir, mode: 'copy'
     container 'encodedcc/atac-seq-pipeline:PIP-1469_pbam_b92239a0-82a0-4297-b8b3-3a655a4626a8'
     cpus 1
@@ -432,7 +432,7 @@ process pcr_bottleneck_coefficient{
 // -n = dont output per-base depth. skipping this output will speed execution
 // -x = dont look at internal cigar operations or correct mate overlaps (recommended for most use-cases)
 process mosdepth_sequencing_coverage{
-    tag pair_id
+    tag "${pair_id}"
     publishDir mosdepth_sequencing_coverage_publishDir, mode: 'copy'
     container 'davelabhub/mosdepth:0.2.5--hb763d49_0'
     cpus 1
@@ -451,7 +451,7 @@ process mosdepth_sequencing_coverage{
 
 
 process mosdepth_plot_seq_coverage{
-    tag pair_id
+    tag "${pair_id}"
     publishDir mosdepth_sequencing_coverage_publishDir, mode: 'copy'
     container "quay.io/biocontainers/python:3.8.3"
     cpus 1
