@@ -381,7 +381,7 @@ process markduplicates_spark{
 
 // // START OF EVALUATION METRICS
 process collect_gc_bias_metrics{
-    tag pair_id
+    tag "${pair_id}"
     publishDir collect_gc_bias_metrics_publishDir, mode: 'copy'
     container 'broadinstitute/gatk:4.2.0.0'
     cpus 1
