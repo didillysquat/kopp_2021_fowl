@@ -45,6 +45,42 @@ scaffold_list = {
 
 Channel.fromList(scaffold_list).into{scaffold_list_ch; scaffold_list_gather_vcfs_ch}
 
+make_indices_from_scratch = {
+    if (!params.remake_indices){
+        // Check to see if the reference assembly indices already exist
+        if (params.mapping == "ngm"){
+            from_scratch = {   
+                def file_objects = [];
+                def extensions = ["", "-enc.2.ngm", "-ht-13-2.3.ngm"];
+                def all_indices_found = true;
+                extensions.each{
+                    def file_object = new File("${params.ref_assembly_path}${it}")
+                    if (!file_object.exists()) {all_indices_found = false;}
+                }
+                return !all_indices_found
+            }()
+            return from_scratch
+        }else{
+            from_scratch = {   
+                def file_objects = [];
+                def extensions = ["", ".sa", ".amb", ".ann", ".pac", ".bwt"];
+                def all_indices_found = true;
+                extensions.each{
+                    def file_object = new File("${params.ref_assembly_path}${it}")
+                    if (!file_object.exists()) {all_indices_found = false;}
+                }
+                return !all_indices_found
+            }()
+            return from_scratch
+        }
+    }else{
+        // Recompute the reference assmbly indices irrespective of if they already exist
+        return true
+    }
+}()
+
+
+
 // This method makes read_group_map that is a list of tuples where the first element is the pair_id
 // and the second is the string that is used by AddOrReplaceReadGroups.
 
@@ -143,6 +179,7 @@ if (params.subsample){
     Channel.fromFilePairs("${params.raw_reads_dir}/*_{1,2}.fastq.gz").into{ch_fastqc_pre_trim; ch_trimmomatic_input}
 }
 
+// TODO these first three processes should likely be replaced with fastp in future pipelines.
 // NB the biocontainers container biocontainers/fastqc:v0.11.9_cv7 does not work on BINAC.
 process fastqc_pre_trim{
     tag "${pair_id}"
@@ -222,23 +259,32 @@ process fastqc_post_trim{
 // and we need to channel these appropriately into any process that wants to use them.
 // The former relies on the params.ref_assembly_path being accessibly by next flow (i.e. below the root directory)
 // of the project. The latter method does not. As such we will go with the latter.
+
+// TODO to speed up the indexing we should check to see if the indices already exist
+// and create a channel from them if so. Else do the indexing from scratch.
 if (params.mapping == "ngm"){
-    process nextgenmap_indexing{
-        conda 'envs/ngm.yaml'
-        cpus params.nextgenmap_threads
+    if (make_indices_from_scratch){
+        process nextgenmap_indexing{
+            conda 'envs/ngm.yaml'
+            cpus params.nextgenmap_threads
 
-        input:
-        path ref_genome from params.ref_assembly_path
+            input:
+            path ref_genome from params.ref_assembly_path
 
-        output:
-        tuple path(ref_genome), path("*.ngm") into ngm_index_ch
+            output:
+            tuple path(ref_genome), path("*.ngm") into ngm_index_ch
 
-        script:
-        """
-        ngm -t ${task.cpus} -r ${ref_genome}
-        """
+            script:
+            """
+            ngm -t ${task.cpus} -r ${ref_genome}
+            """
+        }
+    }else{
+        // Manually create the channel
+        println("Using existing NextGenMap indices")
+        ngm_index_ch = Channel.fromList([[file(params.ref_assembly_path), file("${params.ref_assembly_path}{-enc.2.ngm, -ht-13-2.3.ngm}")]])
     }
-
+    
     process nextgenmap_mapping{
         tag "${pair_id}"
         conda 'envs/ngm.yaml'
@@ -258,23 +304,30 @@ if (params.mapping == "ngm"){
         """
     }
 }else{
-    process bwa_indexing{
-        container 'biocontainers/bwa:v0.7.17_cv1'
-        if (workflow.containerEngine == 'docker'){
-            containerOptions '-u $(id -u):$(id -g)'
+    // TODO check to see if the indice files already exist and if create the channel from this
+    if (make_indices_from_scratch){
+        process bwa_indexing{
+            container 'biocontainers/bwa:v0.7.17_cv1'
+            if (workflow.containerEngine == 'docker'){
+                containerOptions '-u $(id -u):$(id -g)'
+            }
+            cpus params.nextgenmap_threads
+
+            input:
+            path ref_genome from params.ref_assembly_path
+
+            output:
+            tuple path(ref_genome), path("*{.sa,.amb,.ann,.pac,.bwt}") into ngm_index_ch
+
+            script:
+            """
+            bwa index ${ref_genome}
+            """
         }
-        cpus params.nextgenmap_threads
-
-        input:
-        path ref_genome from params.ref_assembly_path
-
-        output:
-        tuple path(ref_genome), path("*{.sa,.amb,.ann,.pac,.bwt}") into ngm_index_ch
-
-        script:
-        """
-        bwa index ${ref_genome}
-        """
+    }else{
+        // Manually create the channel 
+        println("Using existing BWA indices")
+        ngm_index_ch = Channel.fromList([[file(params.ref_assembly_path), file("${params.ref_assembly_path}{.sa,.amb,.ann,.pac,.bwt}")]])
     }
 
     process bwa_mapping{
@@ -298,7 +351,7 @@ if (params.mapping == "ngm"){
         bwa mem -t ${task.cpus} ${ref_genome} ${unpaired[1]} > ${pair_id}_U2_mapped.unsorted.sam;
         """
     }
-
+    
     // --threads is the number of additional threads to use (hence the -1)
     process samtools_sort{
         tag "${pair_id}"
@@ -400,7 +453,6 @@ process collect_gc_bias_metrics{
     """
 }
 
-
 process pcr_bottleneck_coefficient{
     tag "${pair_id}"
     publishDir pcr_bottleneck_coefficient_publishDir, mode: 'copy'
@@ -448,7 +500,6 @@ process mosdepth_sequencing_coverage{
     mosdepth -nx ${pair_id}.merged ${merged[0]}
     """
 }
-
 
 process mosdepth_plot_seq_coverage{
     tag "${pair_id}"
