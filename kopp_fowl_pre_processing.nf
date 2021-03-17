@@ -181,7 +181,7 @@ if (params.subsample){
         """
     }
 }else{
-    Channel.fromFilePairs("${params.raw_reads_dir}/*_{1,2}.fastq.gz").into{ch_fastqc_pre_trim; ch_trimmomatic_input}
+    Channel.fromFilePairs("${params.raw_reads_dir}/*R{1,2}*.fastq.gz").into{ch_fastqc_pre_trim; ch_trimmomatic_input}
 }
 
 // TODO these first three processes should likely be replaced with fastp in future pipelines.
