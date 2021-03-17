@@ -234,7 +234,7 @@ process trimmomatic{
 
 // NB the biocontainers container biocontainers/fastqc:v0.11.9_cv7 does not work on BINAC.
 // NB running fastqc on the unpaired files is causing fastqc to hang so we will only run
-// on the paired files
+// on the paired files: https://github.com/s-andrews/FastQC/issues/74
 process fastqc_post_trim{
     tag "${pair_id}"
     container 'singlecellpipeline/fastqc:v0.0.2'
@@ -245,7 +245,7 @@ process fastqc_post_trim{
     tuple val(pair_id), file(paired_files), file(unpaired_files) from ch_fastqc_post_trim_paired.join(ch_fastqc_post_trim_unpaired)
 
     output:
-    tuple file("${pair_id}*1P*fastqc.html"), file("${pair_id}*2P*fastqc.html"), file("${pair_id}*1U*fastqc.html"), file("${pair_id}*2U*fastqc.html") into ch_fastqc_post_trim_output
+    tuple file("${pair_id}*1P*fastqc.html"), file("${pair_id}*2P*fastqc.html") into ch_fastqc_post_trim_output
 
     script:
     """
