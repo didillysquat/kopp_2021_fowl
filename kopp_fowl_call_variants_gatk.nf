@@ -137,7 +137,6 @@ process gatk_haplotype_caller_gvcf{
     tag {pair_id}
     container 'broadinstitute/gatk:4.2.0.0'
     cpus params.gatk_haplotype_caller_cpus
-    memory "24 GB"
 
     input:
     tuple val(pair_id), path(merged), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from gatk_haplotype_caller_gvcf_ch.combine(gatk_haplotype_caller_ref_genome_ch)
@@ -155,7 +154,6 @@ process gatk_haplotype_caller_gvcf{
 process genomics_db_import{
     tag "${scaffold}"
     cpus 1
-    memory "24 GB"
     container 'broadinstitute/gatk:4.2.0.0'
 
     input:
