@@ -233,6 +233,8 @@ process trimmomatic{
 }
 
 // NB the biocontainers container biocontainers/fastqc:v0.11.9_cv7 does not work on BINAC.
+// NB running fastqc on the unpaired files is causing fastqc to hang so we will only run
+// on the paired files
 process fastqc_post_trim{
     tag "${pair_id}"
     container 'singlecellpipeline/fastqc:v0.0.2'
@@ -249,8 +251,6 @@ process fastqc_post_trim{
     """
     fastqc -o . ${paired_files[0]}
     fastqc -o . ${paired_files[1]}
-    fastqc -o . ${unpaired_files[0]}
-    fastqc -o . ${unpaired_files[1]}
     """
 }
 
