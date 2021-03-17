@@ -24,11 +24,11 @@
 */
 
 /*
-This workflow takes bam files as input and outputs a) multi-sample per scaffold vcfs and b) multi-sample vcfs.
-The multi-sample per-scaffold vcfs (a), can be used as input to BQSR workflow to save running GenomicsDBImport and GenotypeGVCFs
+This workflow takes bam files as input and outputs a multi-sample vcf and related stats.
+The multi-sample vcf can be used as input to BQSR workflow to save running GenomicsDBImport and GenotypeGVCFs
 as the first two processes of the BQSR pipeline.
-The multi-sample vcfs (b) are the vcfs that will be carried forwards for analysis.
-This workflow outputs summary metrics of the produced multi-sample vcf files (b) that can be used to compare the effect
+The multi-sample vcf is the vcfs that will be carried forwards for analysis.
+This workflow outputs summary metrics of the produced multi-sample vcf file that can be used to compare the effect
 running BQSR (e.g. by comparing Ti/Tv ratios or number of SNPs).
 */
 
