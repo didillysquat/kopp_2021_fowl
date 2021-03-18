@@ -136,7 +136,7 @@ process index_dictionary_refgenome{
 process gatk_haplotype_caller_gvcf{
     tag {pair_id}
     container 'broadinstitute/gatk:4.2.0.0'
-    cpus params.gatk_haplotype_caller_cpus
+    cpus 1
 
     input:
     tuple val(pair_id), path(merged), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from gatk_haplotype_caller_gvcf_ch.combine(gatk_haplotype_caller_ref_genome_ch)
@@ -147,7 +147,7 @@ process gatk_haplotype_caller_gvcf{
 
     script:
     """
-    gatk HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R $ref_genome -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
+    gatk --java-options "-Xmx${params.haplotypecaller_max_mem}g" HaplotypeCaller -R $ref_genome -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
     """
 }
 
