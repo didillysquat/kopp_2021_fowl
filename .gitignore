@@ -6,3 +6,4 @@ outputs*
 work
 GCF*
 sub_sampled_outputs
+bin/find_missing_file.py
