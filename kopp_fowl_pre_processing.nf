@@ -201,7 +201,7 @@ process fastqc_pre_trim{
     script:
     out_name = fastq_file.getName().replaceAll('.fastq.gz', '.pre_trim.fastqc.html')
     """
-    fastqc -o . $fastq_file
+    fastqc -t 2 -o . $fastq_file
     mv *.html ${out_name}
     """
 }
@@ -235,6 +235,8 @@ process trimmomatic{
 // NB the biocontainers container biocontainers/fastqc:v0.11.9_cv7 does not work on BINAC.
 // NB running fastqc on the unpaired files is causing fastqc to hang so we will only run
 // on the paired files: https://github.com/s-andrews/FastQC/issues/74
+// As an extra causion we will use the -t 2 option to use two threads wich each get allocated
+// 250 MB of memory.
 process fastqc_post_trim{
     tag "${pair_id}"
     container 'singlecellpipeline/fastqc:v0.0.2'
@@ -249,8 +251,8 @@ process fastqc_post_trim{
 
     script:
     """
-    fastqc -o . ${paired_files[0]}
-    fastqc -o . ${paired_files[1]}
+    fastqc -t 2 -o . ${paired_files[0]}
+    fastqc -t 2 -o . ${paired_files[1]}
     """
 }
 
