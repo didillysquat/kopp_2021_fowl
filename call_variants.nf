@@ -62,7 +62,7 @@ if(!params.overwrite){
 // The deduction of the pair_ids here is reliant on the bam files ending in ".merged.deduplicated.sorted.bam".
 // This will be the case if these bam files have been output from the pre_processing pipeline.
 // Alternatively the command line parameter bam_common_extension can be set to a different default string.
-Channel.fromFilePairs("${params.bam_input_dir}/*.bam{,.bai}").toList().flatMap{
+Channel.fromFilePairs("${params.input_dir}/*.bam{,.bai}").toList().flatMap{
         list_of_bams -> 
         
         def group_list = [];
@@ -100,7 +100,7 @@ Channel.fromFilePairs("${params.bam_input_dir}/*.bam{,.bai}").toList().flatMap{
 // used in vcf calling.
 scaffold_list = {  
     def scaffolds = []
-    new File(params.ref_assembly_path).eachLine {
+    new File(params.ref).eachLine {
         line -> 
         if (line.startsWith(">")){scaffolds << line.split()[0][1..-1];}
         }
@@ -112,7 +112,7 @@ process index_dictionary_refgenome{
     container 'broadinstitute/gatk:4.2.0.0'
 
     input:
-    path ref_genome from params.ref_assembly_path
+    path ref_genome from params.ref
 
     output:
     tuple path(ref_genome), path("*.dict"), path("*.fai") into gatk_haplotype_caller_ref_genome_ch,GenotypeGVCFs_ref_genome_ch,bcftools_vcfstats_ref_genome_ch
@@ -249,7 +249,6 @@ process rtg_vcfstats_per_sample{
     """
     rtg vcfstats $vcf > rtg.stats.per_sample.txt
     """
-
 }
 
 process rtg_vcfstats_summary{

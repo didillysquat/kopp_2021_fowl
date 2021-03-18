@@ -23,9 +23,16 @@
     Contact: didillysquat@gmail.com
 */
 
+/* TODO
+Make the info tsv optional
+Adapt to work with SE and PE reads
+Add the pileupCaller
+Add FreeBayes
+*/
+
 // Check that the ref genome is decompressed
-if (params.ref_assembly_path.endsWith(".bgz") || params.ref_assembly_path.endsWith(".gz") || params.ref_assembly_path.endsWith(".zip")){
-    throw new Exception("The reference assembly genome must be decompressed and in fasta format (.fna, .fa, .fasta). Currently the reference genome path is set to ${params.ref_assembly_path}")
+if (params.ref.endsWith(".bgz") || params.ref.endsWith(".gz") || params.ref.endsWith(".zip")){
+    throw new Exception("The reference assembly genome must be decompressed and in fasta format (.fna, .fa, .fasta). Currently the reference genome path is set to ${params.ref}")
 }
 
 bin_dir = "${workflow.launchDir}/bin"
@@ -36,7 +43,7 @@ tru_seq_pe_fasta_path = "${workflow.launchDir}/TruSeq3-PE.fa"
 
 scaffold_list = {  
     def scaffolds = []
-    new File(params.ref_assembly_path).eachLine {
+    new File(params.ref).eachLine {
         line -> 
         if (line.startsWith(">")){scaffolds << line.split()[0][1..-1];}
         }
@@ -54,7 +61,7 @@ make_indices_from_scratch = {
                 def extensions = ["", "-enc.2.ngm", "-ht-13-2.3.ngm"];
                 def all_indices_found = true;
                 extensions.each{
-                    def file_object = new File("${params.ref_assembly_path}${it}")
+                    def file_object = new File("${params.ref}${it}")
                     if (!file_object.exists()) {all_indices_found = false;}
                 }
                 return !all_indices_found
@@ -66,7 +73,7 @@ make_indices_from_scratch = {
                 def extensions = ["", ".sa", ".amb", ".ann", ".pac", ".bwt"];
                 def all_indices_found = true;
                 extensions.each{
-                    def file_object = new File("${params.ref_assembly_path}${it}")
+                    def file_object = new File("${params.ref}${it}")
                     if (!file_object.exists()) {all_indices_found = false;}
                 }
                 return !all_indices_found
@@ -87,13 +94,13 @@ make_indices_from_scratch = {
 (read_group_map, num_samples) = {
     def tup_list = []
     def pair_id_list = []
-    new File(params.read_info_file).eachLine {  
+    new File(params.input_tsv).eachLine {  
         line ->
         line_comp = line.tokenize();
         // Skip the header line of the .tsv
         if (line_comp[0].endsWith(".gz")){            
             // TODO check to see that the file exists and return error if it does not
-            def should_exist = new File("${params.raw_reads_dir}/${line_comp[0]}")
+            def should_exist = new File("${params.input_dir}/${line_comp[0]}")
             if (!should_exist.exists()){
                 throw new Exception("${should_exist} not found.")
             }
@@ -154,7 +161,7 @@ if not subsample, then create channel directly from the raw sequencing files
 // NB the containerOoptions are required when using the docker profile to prevent permission errors
 // They are not required when running a singularity profile.
 if (params.subsample){
-    ch_subsample = Channel.fromFilePairs("${params.raw_reads_dir}/*R{1,2}*.fastq.gz")    
+    ch_subsample = Channel.fromFilePairs("${params.input_dir}/*R{1,2}*.fastq.gz")    
     process subsample{
         tag "${pair_id}"
         cache 'lenient'
@@ -181,7 +188,7 @@ if (params.subsample){
         """
     }
 }else{
-    Channel.fromFilePairs("${params.raw_reads_dir}/*R{1,2}*.fastq.gz").into{ch_fastqc_pre_trim; ch_trimmomatic_input}
+    Channel.fromFilePairs("${params.input_dir}/*R{1,2}*.fastq.gz").into{ch_fastqc_pre_trim; ch_trimmomatic_input}
 }
 
 // TODO these first three processes should likely be replaced with fastp in future pipelines.
@@ -256,17 +263,7 @@ process fastqc_post_trim{
     """
 }
 
-// Index the nextgenmap index before doing the mapping
-// Two options here, either supply the params.ref_assembly_path directly to ngm
-// or path in ref_genome path made from the params.ref_assembly_path
-// They have different results. For the first, ngm will look for the indexed files
-// in the same directory as the params.ref_assembly_path. If they exist the indexing will be skipped.
-// With this option the param arguments must be again passed directly to any process that uses the indices.
-// Alternatively, with the second method, the indices will be stored in the nextflow work directory
-// and we need to channel these appropriately into any process that wants to use them.
-// The former relies on the params.ref_assembly_path being accessibly by next flow (i.e. below the root directory)
-// of the project. The latter method does not. As such we will go with the latter.
-
+// Index ref assembly and map
 // NB we check to see if the indexing files already exist and
 // make use of them if params.remake_indices if false
 if (params.mapping == "ngm"){
@@ -276,7 +273,7 @@ if (params.mapping == "ngm"){
             cpus params.nextgenmap_threads
 
             input:
-            path ref_genome from params.ref_assembly_path
+            path ref_genome from params.ref
 
             output:
             tuple path(ref_genome), path("*.ngm") into ngm_index_ch
@@ -289,7 +286,7 @@ if (params.mapping == "ngm"){
     }else{
         // Manually create the channel
         println("Using existing NextGenMap indices")
-        ngm_index_ch = Channel.fromList([[file(params.ref_assembly_path), file("${params.ref_assembly_path}{-enc.2.ngm, -ht-13-2.3.ngm}")]])
+        ngm_index_ch = Channel.fromList([[file(params.ref), file("${params.ref}{-enc.2.ngm, -ht-13-2.3.ngm}")]])
     }
     
     process nextgenmap_mapping{
@@ -321,7 +318,7 @@ if (params.mapping == "ngm"){
             cpus params.nextgenmap_threads
 
             input:
-            path ref_genome from params.ref_assembly_path
+            path ref_genome from params.ref
 
             output:
             tuple path(ref_genome), path("*{.sa,.amb,.ann,.pac,.bwt}") into ngm_index_ch
@@ -334,7 +331,7 @@ if (params.mapping == "ngm"){
     }else{
         // Manually create the channel 
         println("Using existing BWA indices")
-        ngm_index_ch = Channel.fromList([[file(params.ref_assembly_path), file("${params.ref_assembly_path}{.sa,.amb,.ann,.pac,.bwt}")]])
+        ngm_index_ch = Channel.fromList([[file(params.ref), file("${params.ref}{.sa,.amb,.ann,.pac,.bwt}")]])
     }
 
     process bwa_mapping{
@@ -448,7 +445,7 @@ process collect_gc_bias_metrics{
 
     input:
     tuple val(pair_id), path(merged) from collect_gc_bias_metrics_ch
-    path ref_genome from params.ref_assembly_path
+    path ref_genome from params.ref
     
     output:
     tuple path("${pair_id}.merged.GCBias.txt"), path("${pair_id}.merged.GCBias.pdf"), path("${pair_id}.merged.SumBias.txt")

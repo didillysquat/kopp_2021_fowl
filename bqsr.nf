@@ -71,7 +71,7 @@ if(!params.overwrite){
 // used in vcf calling.
 scaffold_list = {  
     def scaffolds = []
-    new File(params.ref_assembly_path).eachLine {
+    new File(params.ref).eachLine {
         line -> 
         if (line.startsWith(">")){scaffolds << line.split()[0][1..-1];}
         }
@@ -98,7 +98,7 @@ process index_dictionary_refgenome{
     container "broadinstitute/gatk:4.2.0.0"
     
     input:
-    path ref_genome from params.ref_assembly_path
+    path ref_genome from params.ref
 
     output:
     tuple path(ref_genome), path("*.dict"), path("*.fai") into gatk_haplotype_caller_ref_genome_ch,GenotypeGVCFs_ref_genome_ch,make_bqsr_tables_ref_genome_ch,apply_bqsr_tables_ref_genome_ch,make_bqsr_tables_ref_genome_round_2_ch,split_vcf_by_scaffold_ref_genome_ch
@@ -110,48 +110,47 @@ process index_dictionary_refgenome{
     """
     }
 
-params.vcf_input_path = false
-if (!params.vcf_input_path){
-    // Then we are working from bams only and need to run all processes.
-    // Create a channel that is a tuple of the pair_id and the corresponding bam as output from the preprocessing workflow
-    // The deduction of the pair_ids here is reliant on the bam files ending in ".merged.deduplicated.sorted.bam".
-    // This will be the case if these bam files have been output from the pre_processing pipeline.
-    // Alternatively the command line parameter bam_common_extension can be set to a different default string.
-    
-    // We will generate the group name by removing all parts of the file name that are found in common between all samples.
-    Channel.fromFilePairs("${params.bam_input_dir}/*.bam{,.bai}").toList().flatMap{
-        list_of_bams -> 
-        println("This is the list_of_bams: ${list_of_bams}")
-        def group_list = [];
-        // For each of the bam sets, pull out the current group name and put it into the group_list
-        list_of_bams.eachWithIndex{ bam_set, i -> group_list << bam_set[0];}
-        println("This is the group_list: ${group_list}" )
-        // Then work backwards on a per character basis checking to see if the character is found in common
-        // for all samples. If it is then this will be a character to discard. Keep going until
-        // we find a character that is not in common across all names and make a note of the index position.
-        // We will then return the group ids with this number of characters discarded
-        def cut_index = 0;
-        def exit = false;
-        for (i = 1; !exit; i++) {
-            // For each character starting from the last
-            start_char = group_list[0].charAt(group_list[0].length() - i)
-            println("Start char is currently: ${start_char}")
-            group_list.eachWithIndex{
-                group_name, j -> 
-                    if (group_name.charAt(group_name.length() - i) != start_char){
-                        // Then j is the index to start cutting from
-                        cut_index = -1 * i;
-                        println("Look we got here and the cut index is: ${cut_index}")
-                        exit = true;
-                    }
+params.input_vcf = false
+
+// We will generate the group name by removing all parts of the file name that are found in common between all samples.
+bam_ch = Channel.fromFilePairs("${params.input_dir}/*.bam{,.bai}").toList().flatMap{
+    list_of_bams -> 
+    // println("This is the list_of_bams: ${list_of_bams}")
+    def group_list = [];
+    // For each of the bam sets, pull out the current group name and put it into the group_list
+    list_of_bams.eachWithIndex{ bam_set, i -> group_list << bam_set[0];}
+    // println("This is the group_list: ${group_list}" )
+    // Then work backwards on a per character basis checking to see if the character is found in common
+    // for all samples. If it is then this will be a character to discard. Keep going until
+    // we find a character that is not in common across all names and make a note of the index position.
+    // We will then return the group ids with this number of characters discarded
+    def cut_index = 0;
+    def exit = false;
+    for (i = 1; !exit; i++) {
+        // For each character starting from the last
+        start_char = group_list[0].charAt(group_list[0].length() - i)
+        // println("Start char is currently: ${start_char}")
+        group_list.eachWithIndex{
+            group_name, j -> 
+                if (group_name.charAt(group_name.length() - i) != start_char){
+                    // Then j is the index to start cutting from
+                    cut_index = -1 * i;
+                    // println("Look we got here and the cut index is: ${cut_index}")
+                    exit = true;
                 }
-        }
-        // Now that we have the cut index we can cut each of the group names
-        // At this point we want to create a new list and return it
-        def output_list = [];
-        list_of_bams.eachWithIndex{bam_set, i -> output_list << [bam_set[0][0..cut_index], bam_set[1] ];}
-        return output_list;
-    }.into{gatk_haplotype_caller_gvcf_ch; make_bqsr_tables_bam_ch}
+            }
+    }
+    // Now that we have the cut index we can cut each of the group names
+    // At this point we want to create a new list and return it
+    def output_list = [];
+    list_of_bams.eachWithIndex{bam_set, i -> output_list << [bam_set[0][0..cut_index], bam_set[1] ];}
+    return output_list;
+}
+
+if (!params.input_vcf){
+    // Then we are working from bams only and need to run all processes.
+    bam_ch.into{gatk_haplotype_caller_gvcf_ch; make_bqsr_tables_bam_ch}
+    
     
     // // NB HaplotypCaller requires a .fai
     // // https://gatk.broadinstitute.org/hc/en-us/articles/360035531652-FASTA-Reference-genome-format
@@ -214,13 +213,14 @@ if (!params.vcf_input_path){
     }
 
 }else{
+    //TODO work with the common names rather than the params.bam_common_extension.
     // Then we have been provided with a vcf to hard filter from.
     // Can skip HaplotypeCaller, GenomicsDBImport and GenotypeGVCFs
     // Need to split the provided vcf by haplotype to pass into hard filtering
     // Output of the process needs to be a channel of tuples of the scaffold name, the vcf and the vcf.idx
-    make_bqsr_tables_bam_ch = Channel.fromFilePairs("${params.bam_input_dir}/*.bam{,.bai}").map{it -> [it[1][0].getName().replaceAll(params.bam_common_extension, ""), [it[1][0], it[1][1]]]}
-    split_vcf_by_scaffold_vcf_ch = Channel.fromPath(params.vcf_input_path)
-    split_vcf_by_scaffold_vcf_idx_ch = Channel.fromPath("${params.vcf_input_path}.idx")
+    bam_ch.set{make_bqsr_tables_bam_ch}
+    split_vcf_by_scaffold_vcf_ch = Channel.fromPath(params.input_vcf)
+    split_vcf_by_scaffold_vcf_idx_ch = Channel.fromPath("${params.input_vcf}.idx")
     
     process split_vcf_by_scaffold{
         tag {scaffold}
