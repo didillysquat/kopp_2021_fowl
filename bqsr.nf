@@ -50,7 +50,7 @@ if (params.subsample){
     gatk_bqsr_analyze_covariates_publishDir = [params.output_dir, "gatk_bqsr_analyze_covariates_metrics_sub_${params.subsample_depth}"].join(File.separator)
 }else{
     params.output_dir = "${workflow.launchDir}/outputs/bqsr_${params.iteration}"
-    gatk_bqsr_bam_publishDir = [params.output_dir, "gatk_bqsr_output_bams_sub_${params.subsample_depth}"].join(File.separator)
+    gatk_bqsr_bam_publishDir = [params.output_dir, "gatk_bqsr_output_bams"].join(File.separator)
     gatk_bqsr_analyze_covariates_publishDir = [params.output_dir, "gatk_bqsr_analyze_covariates_metrics"].join(File.separator)
 }
 

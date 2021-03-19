@@ -24,10 +24,11 @@
 */
 
 /* TODO
-Make the info tsv optional
+Make the input format come from tsv specifiying full sequence paths, read group info and sample name
 Adapt to work with SE and PE reads
 Add the pileupCaller
 Add FreeBayes
+Check that subsampling works by only providing the --subsample flag
 */
 
 // Check that the ref genome is decompressed
