@@ -6,7 +6,37 @@
 
 **WARNING: This workflow and documentation are still in development**
 
+- [Introduction](#introduction)
+- [Quick Start](#quick-start)
+  - [preprocess.nf quick start](#preprocessnf-quick-start)
+  - [bqsr.nf quick start](#bqsrnf-quick-start)
+  - [genotype.nf quick start](#genotypenf-quick-start)
+- [Workflow summary](#workflow-summary)
+  - [preprocess.nf summary](#preprocessnf-summary)
+    - [preprocess.nf default pipeline](#preprocessnf-default-pipeline)
+    - [preprocess.nf alternative options](#preprocessnf-alternative-options)
+  - [bqsr.nf summary](#bqsrnf-summary)
+    - [bqsr.nf default pipeline (without VCF provided as input)](#bqsrnf-default-pipeline-without-vcf-provided-as-input)
+    - [bqsr.nf default pipeline (with VCF provided as input)](#bqsrnf-default-pipeline-with-vcf-provided-as-input)
+  - [genotype.nf summary](#genotypenf-summary)
+    - [genotype.nf default pipeline (Currently only implemented with GATK)](#genotypenf-default-pipeline-currently-only-implemented-with-gatk)
+- [Documentation](#documentation)
+  - [General documentation](#general-documentation)
+    - [Nextflow arguments](#nextflow-arguments)
+    - [General pipeline arguments](#general-pipeline-arguments)
+    - [General pipeline outputs](#general-pipeline-outputs)
+  - [preprocess.nf documentation](#preprocessnf-documentation)
+    - [preprocess.nf arguments](#preprocessnf-arguments)
+    - [preprocess.nf outputs](#preprocessnf-outputs)
+  - [bqsr.nf documentation](#bqsrnf-documentation)
+    - [bqsr.nf arguments](#bqsrnf-arguments)
+    - [bqsr.nf outputs](#bqsrnf-outputs)
+  - [genotype.nf documentation](#genotypenf-documentation)
+    - [genotype.nf arguments](#genotypenf-arguments)
+    - [genotype.nf outputs](#genotypenf-outputs)
+
 ## Introduction
+
 This workflow is being developed as part of a research effort out of the [Kopp Group](https://www.ab.mpg.de/personen/98288) in collaboration with the [Sequencing Analysis Core Facility (SequAna)](https://www.biologie.uni-konstanz.de/sequana/) at the [University of Konstanz](https://www.uni-konstanz.de/en/).
 
 The research effort is focused on relatedness in wild Guineafowl but this workflow may be applied to any diploid Eukaryotic organism for which an appropriate reference genome is available.
@@ -32,7 +62,7 @@ Install one of [Singularity](https://singularity.lbl.gov/install-linux) of [Dock
 Provide your chosen container management system at the profile flag e.g.:
 `-profile singularity` or `-profile docker`.
 
-#### preprocess.nf quick start
+### preprocess.nf quick start
 
 ```bash
 nextflow run preprocess.nf -profile <docker|singularity> --ref </path/to/your/ref/assembly.fna|fasta|fa> --input_dir </path/to/dir/with/paired/fastq.gz/reads/> --input_tsv </path/to/tsv/with/readgroup/info/>
@@ -40,13 +70,13 @@ nextflow run preprocess.nf -profile <docker|singularity> --ref </path/to/your/re
 
 [example readgroup info tsv]()
 
-#### bqsr.nf quick start
+### bqsr.nf quick start
 
 ```bash
 nextflow run bqsr.nf -profile <docker|singularity> --ref </path/to/your/ref/assembly.fna|fasta|fa> --input_dir </path/to/dir/with/bam/and/bam.bai/> [--input_vcf </path/to/multi-sample/vcf>]
 ```
 
-#### genotype.nf quick start
+### genotype.nf quick start
 
 ```bash
 nextflow run genotyping.nf -profile <docker|singularity> --ref </path/to/your/ref/assembly.fna|fasta|fa> --input_dir </path/to/dir/with/bam/and/bam.bai/> 
@@ -67,7 +97,6 @@ nextflow run genotyping.nf -profile <docker|singularity> --ref </path/to/your/re
 - Annotation with read group headers [[gatk AddOrReplaceReadGroups](https://gatk.broadinstitute.org/hc/en-us/articles/360041850851-AddOrReplaceReadGroups-Picard-)]
 - Remove duplicate reads [[gatk MarkDuplicatesSpark](https://gatk.broadinstitute.org/hc/en-us/articles/360057438771-MarkDuplicatesSpark)]
 - Collect read metrics [GC metrics: [gatk CollectGcBiasMetrics](), PCR bottleneck coefficient, sequencing coverage: [mosdepth](https://github.com/brentp/mosdepth)]
-- [Subsample reads [seqtk]]
 
 #### **preprocess.nf alternative options**
 
