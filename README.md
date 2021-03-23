@@ -39,7 +39,7 @@
 
 This workflow is being developed as part of a research effort out of the [Kopp Group](https://www.ab.mpg.de/personen/98288) in collaboration with the [Sequencing Analysis Core Facility (SequAna)](https://www.biologie.uni-konstanz.de/sequana/) at the [University of Konstanz](https://www.uni-konstanz.de/en/).
 
-The research effort is focused on relatedness in wild Guineafowl with analyses adapted from [Snyder-Mackler et al. 2016](https://academic.oup.com/genetics/article/203/2/699/6066257). However this workflow may be applied to any diploid Eukaryotic organism for which an appropriate reference genome is available.
+The research effort is focused on relatedness in wild Guineafowl with analyses adapted from [Snyder-Mackler et al. 2016](https://academic.oup.com/genetics/article/203/2/699/6066257). However, this workflow may be applied to any diploid Eukaryotic organism for which an appropriate reference genome is available.
 
 In particular the workflow is designed for organims for which there are no known/high confidence variant resources (e.g. dbSNP).
 
