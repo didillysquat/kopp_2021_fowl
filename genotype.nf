@@ -33,14 +33,14 @@ running BQSR (e.g. by comparing Ti/Tv ratios or number of SNPs).
 */
 
 bin_dir = "${workflow.launchDir}/bin"
-params.iteration = 0
+
 params.overwrite = false
 if (params.subsample){
-    params.output_dir = "${workflow.launchDir}/sub_sampled_outputs/gatk_variant_calling_${params.iteration}"
+    params.output_dir = "${workflow.launchDir}/sub_sampled_outputs/gatk_variant_calling"
     gatk_output_vcf_publishDir = [params.output_dir, "gatk_output_variants_sub_${params.subsample_depth}"].join(File.separator)
     gatk_vcf_stats_publishDir = [params.output_dir, "gatk_vcf_stats_sub_${params.subsample_depth}"].join(File.separator)
 }else{
-    params.output_dir = "${workflow.launchDir}/outputs/gatk_variant_calling_${params.iteration}"
+    params.output_dir = "${workflow.launchDir}/outputs/gatk_variant_calling"
     gatk_output_vcf_publishDir = [params.output_dir, "gatk_output_variants"].join(File.separator)
     gatk_vcf_stats_publishDir = [params.output_dir, "gatk_vcf_stats"].join(File.separator)
 }
@@ -52,9 +52,7 @@ if(!params.overwrite){
     def path_to_check = new File(params.output_dir);
     if (path_to_check.exists()) {
         throw new Exception("""The output directory ${path_to_check} already exists.\n
-        If you want to overwrite the contents of this directory, please provide the --overwrite flag.\n
-        Alternatively provide --iteration <int> and the output directories will automatically\n
-        be suffixed with '_<int>'.""")
+        If you want to overwrite the contents of this directory, please provide the --overwrite flag.\n""")
     }
 }
 
@@ -133,6 +131,7 @@ process index_dictionary_refgenome{
 // NB Good reference for the scatter-gather strategy employed here: https://github.com/IARCbioinfo/gatk4-GenotypeGVCFs-nf/blob/master/gatk4-GenotypeGVCFs.nf
 // NB HaplotypCaller requires a .fai
 // https://gatk.broadinstitute.org/hc/en-us/articles/360035531652-FASTA-Reference-genome-format
+// TODO implement the bqsr version of this and the next process.
 process gatk_haplotype_caller_gvcf{
     tag {pair_id}
     container 'broadinstitute/gatk:4.2.0.0'
@@ -157,21 +156,18 @@ process genomics_db_import{
     container 'broadinstitute/gatk:4.2.0.0'
 
     input:
-    each scaffold from Channel.fromList(scaffold_list)
-    path(gvcf) from genomics_db_import_ch.collect{it[1]}
-    path(gvcf_tbi) from genomics_db_import_tbi_ch.collect{it[1]}
-	
-	output:
-    tuple val(scaffold), path("genomicsdbi.out.${scaffold}") into genotype_GVCFs_ch
-	
+    tuple val(pair_id_list), val(scaffold), path(gvcf_list) from genomics_db_import_ch.groupTuple(by: 1)
+    tuple val(pair_id), val(scaffold), path(gvcf_tbi) from genomics_db_import_tbi_ch.groupTuple(by: 1)
+    
+    output:
+    tuple val(scaffold), file("genomicsdbi.out.${scaffold}") into genotype_GVCFs_ch
+    
     script:
-	"""
-	gatk  --java-options '-DGATK_STACKTRACE_ON_USER_EXCEPTION=true' GenomicsDBImport ${gvcf.collect { "-V $it " }.join()} --genomicsdb-workspace-path genomicsdbi.out.${scaffold} -L $scaffold --batch-size 50
-	"""
+    """
+    gatk  --java-options '-DGATK_STACKTRACE_ON_USER_EXCEPTION=true' GenomicsDBImport ${gvcf_list.collect { "-V $it " }.join()} --genomicsdb-workspace-path genomicsdbi.out.${scaffold} -L $scaffold --batch-size 50
+    """
 }
 
-// NB an alternative to passing int the ref_genome_fai and ref_genome_dict
-// is to pass the param to the actual path
 process GenotypeGVCFs{
     container 'broadinstitute/gatk:4.2.0.0'
 	cpus 5
@@ -203,11 +199,11 @@ process gather_vcfs_for_eval{
 	path(vcf_idx) from gather_vcfs_idx_for_eval_ch.collect()
 
 	output:
-    tuple path("fowl.eval.vcf"), path("fowl.eval.vcf.idx") into bcftools_stats_ch,rtg_vcfstats_ch
+    tuple path("out.vcf"), path("out.vcf.idx") into bcftools_stats_ch,rtg_vcfstats_ch
 
     script:
 	"""
-	gatk GatherVcfs ${scaffolds.collect{ "--INPUT GenotypeGVCFs.out.${it}.vcf " }.join()} --OUTPUT fowl.eval.vcf
+	gatk GatherVcfs ${scaffolds.collect{ "--INPUT GenotypeGVCFs.out.${it}.vcf " }.join()} --OUTPUT out.vcf
 	"""
 }
 
@@ -215,7 +211,7 @@ process gather_vcfs_for_eval{
 process bcftools_vcfstats{
     tag "bcftools_stats"
     container "halllab/bcftools:v1.9"
-    publishDir gatk_vcf_stats_publishDir
+    publishDir gatk_vcf_stats_publishDir, mode: "copy"
 
     input:
     tuple path(vcf), path(vcf_idx), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from bcftools_stats_ch.combine(bcftools_vcfstats_ref_genome_ch)
@@ -237,7 +233,7 @@ process bcftools_vcfstats{
 process rtg_vcfstats_per_sample{
     tag "rtg_vcfstats"
     container 'realtimegenomics/rtg-tools:latest'
-    publishDir gatk_vcf_stats_publishDir
+    publishDir gatk_vcf_stats_publishDir, mode: "copy"
 
     input:
     tuple path(vcf), path(vcf_idx) from rtg_vcfstats_ch
@@ -254,7 +250,7 @@ process rtg_vcfstats_per_sample{
 process rtg_vcfstats_summary{
     tag "rtg_vcfstats_summary"
     container 'broadinstitute/gatk:4.2.0.0'
-    publishDir gatk_vcf_stats_publishDir
+    publishDir gatk_vcf_stats_publishDir, mode: "copy"
 
     input:
     path(rtg_vcfstats_output) from rtg_vcfstats_out_ch

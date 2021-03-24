@@ -49,7 +49,7 @@ This workflow is made up of three nextflow pipelines that perform:
 2. Base Quality Score Recalibration - bqsr.nf
 3. Genotyping - genotype.nf
 
-As an example use of the workflow, to generate a set of variants using two sets of BQSR you would run preprocess.nf, genotype.nf, bqsr.nf, genotype.nf, bqsr.nf, genotype.nf. As part of running this set of pipelines, you would be able to assess the effect of each round of BQSR. If further rounds were deemed necessary, another set of bqsr.nf and genotype.nf could be run.
+As an example use of the workflow, to generate a set of variants using two sets of BQSR you would run preprocess.nf, bqsr.nf, bqsr.nf, genotype.nf. As part of running this set of pipelines, you would be able to assess the effect of each round of BQSR. If further rounds were deemed necessary, another set of bqsr.nf and genotype.nf could be run.
 
 If no BQSR is required, the bqsr.nf pipeline can be ommitted from the workflow.
 
@@ -114,20 +114,22 @@ Enabled with `--mapping ngm`
 
 #### **bqsr.nf default pipeline (without VCF provided as input)**
 
-- Create reference genome dictionary [[gatk CreateSequenceDictionary](https://gatk.broadinstitute.org/hc/en-us/articles/360046222771-CreateSequenceDictionary-Picard-)]
-- Create per sample GVCF [[gatk HaplotypeCaller](https://gatk.broadinstitute.org/hc/en-us/articles/360050814612-HaplotypeCaller)]
-- Create per sample GenomicsDB on a per reference scaffold basis [[gatk GenomicsDBImport](https://gatk.broadinstitute.org/hc/en-us/articles/360057439331-GenomicsDBImport)]
-- Perform joint genotyping on a per reference scaffold basis [[gatk GenotypeGVCFs](https://gatk.broadinstitute.org/hc/en-us/articles/360046224151-GenotypeGVCFs)]
-- Create high-confidence variant set on a per reference scaffold basis [[gatk VariantFiltration](https://gatk.broadinstitute.org/hc/en-us/articles/360045800332-VariantFiltration), [gatk SelectVariants](https://gatk.broadinstitute.org/hc/en-us/articles/360047216851-SelectVariants)]
-- Gather per scaffold high-confidence vcfs into single vcf [[gatk GatherVcfs](https://gatk.broadinstitute.org/hc/en-us/articles/360046787092-GatherVcfs-Picard-)]
-- Make BQSR tables on pre-calibration BAMs [[gatk BaseRecalibrator](https://gatk.broadinstitute.org/hc/en-us/articles/360050815072-BaseRecalibrator)]
-- Apply BQSR tables [[gatk ApplyBQSR](https://gatk.broadinstitute.org/hc/en-us/articles/360046222011-ApplyBQSR)]
-- Make BQSR tables on post-calibration BAMs [[gatk BaseRecalibrator](https://gatk.broadinstitute.org/hc/en-us/articles/360050815072-BaseRecalibrator)]
-- Calculate calibration metrics [[gatk AnalyzeCovariates](https://gatk.broadinstitute.org/hc/en-us/articles/360047215811-AnalyzeCovariates)]
+1. Create reference genome dictionary [[gatk CreateSequenceDictionary](https://gatk.broadinstitute.org/hc/en-us/articles/360046222771-CreateSequenceDictionary-Picard-)]
+2. Create per sample, per reference scaffold GVCF [[gatk HaplotypeCaller](https://gatk.broadinstitute.org/hc/en-us/articles/360050814612-HaplotypeCaller)]
+3. Create per sample GenomicsDB on a per reference scaffold basis [[gatk GenomicsDBImport](https://gatk.broadinstitute.org/hc/en-us/articles/360057439331-GenomicsDBImport)]
+4. Perform joint genotyping on a per reference scaffold basis [[gatk GenotypeGVCFs](https://gatk.broadinstitute.org/hc/en-us/articles/360046224151-GenotypeGVCFs)]
+5. Gather per scaffold vcfs into single vcf [[gatk GatherVcfs](https://gatk.broadinstitute.org/hc/en-us/articles/360046787092-GatherVcfs-Picard-)]
+6. Collect genotyping metrics [[bcftools stats](https://github.com/samtools/samtools), [rtg vcfstats](https://github.com/RealTimeGenomics/rtg-tools)]
+7. Create high-confidence variant set on a per reference scaffold basis [[gatk VariantFiltration](https://gatk.broadinstitute.org/hc/en-us/articles/360045800332-VariantFiltration), [gatk SelectVariants](https://gatk.broadinstitute.org/hc/en-us/articles/360047216851-SelectVariants)]
+8. Gather per scaffold high-confidence vcfs into single vcf [[gatk GatherVcfs](https://gatk.broadinstitute.org/hc/en-us/articles/360046787092-GatherVcfs-Picard-)]
+9. Make BQSR tables on pre-calibration BAMs [[gatk BaseRecalibrator](https://gatk.broadinstitute.org/hc/en-us/articles/360050815072-BaseRecalibrator)]
+10. Apply BQSR tables [[gatk ApplyBQSR](https://gatk.broadinstitute.org/hc/en-us/articles/360046222011-ApplyBQSR)]
+11. Make BQSR tables on post-calibration BAMs [[gatk BaseRecalibrator](https://gatk.broadinstitute.org/hc/en-us/articles/360050815072-BaseRecalibrator)]
+12. Calculate calibration metrics [[gatk AnalyzeCovariates](https://gatk.broadinstitute.org/hc/en-us/articles/360047215811-AnalyzeCovariates)]
 
 #### **bqsr.nf default pipeline (with VCF provided as input)**
 
-Same as above, but with the first three steps replaced with:
+Same as above, but with steps 2-6 replaced with:
 - Split multi-sample VCF to create per scaffold VCF set [[gatk SelectVariants](https://gatk.broadinstitute.org/hc/en-us/articles/360047216851-SelectVariants)]
 
 ### genotype.nf summary
@@ -231,7 +233,11 @@ TODO add memory and CPU optimisation arguments.
 
 #### **bqsr.nf outputs**
 
-TODO include the generated vcfs as output as they represent such a computational investment.
+**gatk_bqsr_output_vcf**: The multi-sample .vcf file containing genotype likelihoods generated as part of the bqsr pipeline.
+This is output because performing genotyping represents a large computational invesment and to enable comparison of called variants between rounds of BQSR.
+
+**gatk_bqsr_vcf_stats**: Summary statistics generated for the called genotypes. These files are enable comparison of called genotype likelihoods between rounds of BQSR.
+
 **gatk_bqsr_output_bams**: the post BQSR output .bam and .bam.bai files.
 
 **gatk_bqsr_analyze_covariates_metrics**: Metrics summarising the effects of running BQSR. Generated by running gatk AnalyzeCovariates. See [this GitHub issue](https://github.com/broadinstitute/gatk/issues/322) for further details.
