@@ -58,15 +58,15 @@ with open(rtg_path, 'r') as f:
 
 with open(out_file, 'w') as f:
     f.write(f"Summary of the rtg vcfstats file:\n\n")
-    f.write(f"total SNPs: {sum(snps)}\n\n")
+    f.write(f"Per sample average SNPs: {sum(snps)/len(snps)}\n\n")
 
     # Weighted by the number of SNPs in the sample
     weighted_average_insertions = sum([snp * ins for snp, ins in zip(snps, insertions)]) / sum(snps)
-    f.write(f"weighted average insertions: {weighted_average_insertions:.2f}\n\n")
+    f.write(f"Per sample weighted average insertions: {weighted_average_insertions:.2f}\n\n")
 
     # Weighted by the number of SNPs in the sample
     weighted_average_deletions = sum([snp * dele for snp, dele in zip(snps, deletions)]) / sum(snps)
-    f.write(f"weighted average deletions: {weighted_average_deletions:.2f}\n\n")
+    f.write(f"Per sample weighted average deletions: {weighted_average_deletions:.2f}\n\n")
 
     # Weighted by the number of SNPs in the sample
     # Don't count those samples that had bad ti/tv ratios
@@ -78,7 +78,7 @@ with open(out_file, 'w') as f:
             tot_snp += snp
     if tot_snp > 0:
         weighted_average_ti_tv = weighted_count/tot_snp
-        f.write(f"Weighted average SNP Transitions / Transversions ratio: {weighted_average_ti_tv:.2f}\n")
+        f.write(f"Per sample weighted average SNP Transitions / Transversions ratio: {weighted_average_ti_tv:.2f}\n\n")
         if bad_ti_tv_ratio_samples:
             f.write(f"WARNING: {len(bad_ti_tv_ratio_samples)} samples did not have Ti/Tv ratios counted. "
                     f"These samples were ignored in the calculation of this average.\n\n")
@@ -93,7 +93,7 @@ with open(out_file, 'w') as f:
             tot_snp += snp
     if tot_snp > 0:
         weighted_average_ins_dels = weighted_count/tot_snp
-        f.write(f"Weighted average SNP Insertion / Deletion ratio: {weighted_average_ins_dels:.2f}\n")
+        f.write(f"Per sample weighted average SNP Insertion / Deletion ratio: {weighted_average_ins_dels:.2f}\n")
         if bad_insertion_deletion_ratio_samples:
             f.write(f"WARNING: {len(bad_insertion_deletion_ratio_samples)} samples did not have insertion/deletion "
                     f"ratios counted. "
