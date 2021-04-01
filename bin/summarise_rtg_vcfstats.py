@@ -93,7 +93,7 @@ with open(out_file, 'w') as f:
             tot_snp += snp
     if tot_snp > 0:
         weighted_average_ins_dels = weighted_count/tot_snp
-        f.write(f"Weighted average SNP Transitions / Transversions ratio: {weighted_average_ins_dels:.2f}\n")
+        f.write(f"Weighted average SNP Insertion / Deletion ratio: {weighted_average_ins_dels:.2f}\n")
         if bad_insertion_deletion_ratio_samples:
             f.write(f"WARNING: {len(bad_insertion_deletion_ratio_samples)} samples did not have insertion/deletion "
                     f"ratios counted. "

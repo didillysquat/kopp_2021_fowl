@@ -45,19 +45,14 @@ the differences before and after the BQSR.
 
 bin_dir = "${workflow.launchDir}/bin"
 params.overwrite = false
-if (params.subsample){
-    params.output_dir = "${workflow.launchDir}/sub_sampled_outputs/bqsr/"
-    gatk_bqsr_vcf_publishDir = [params.output_dir, "gatk_bqsr_output_vcf_sub_${params.subsample_depth}"].join(File.separator)
-    gatk_bqsr_bam_publishDir = [params.output_dir, "gatk_bqsr_output_bams_sub_${params.subsample_depth}"].join(File.separator)
-    gatk_bqsr_vcf_stats_publishDir = [params.output_dir, "gatk_bqsr_vcf_stats_sub_${params.subsample_depth}"].join(File.separator)
-    gatk_bqsr_analyze_covariates_publishDir = [params.output_dir, "gatk_bqsr_analyze_covariates_metrics_sub_${params.subsample_depth}"].join(File.separator)
-}else{
-    params.output_dir = "${workflow.launchDir}/outputs/bqsr"
-    gatk_bqsr_vcf_publishDir = [params.output_dir, "gatk_bqsr_output_vcf"].join(File.separator)
-    gatk_bqsr_bam_publishDir = [params.output_dir, "gatk_bqsr_output_bams"].join(File.separator)
-    gatk_bqsr_vcf_stats_publishDir = [params.output_dir, "gatk_bqsr_vcf_stats"].join(File.separator)
-    gatk_bqsr_analyze_covariates_publishDir = [params.output_dir, "gatk_bqsr_analyze_covariates_metrics"].join(File.separator)
-}
+split_haplotype_caller = true
+
+params.output_dir = "${workflow.launchDir}/outputs/bqsr"
+gatk_bqsr_vcf_publishDir = [params.output_dir, "gatk_bqsr_output_vcf"].join(File.separator)
+gatk_bqsr_bam_publishDir = [params.output_dir, "gatk_bqsr_output_bams"].join(File.separator)
+gatk_bqsr_vcf_stats_publishDir = [params.output_dir, "gatk_bqsr_vcf_stats"].join(File.separator)
+gatk_bqsr_analyze_covariates_publishDir = [params.output_dir, "gatk_bqsr_analyze_covariates_metrics"].join(File.separator)
+
 
 // We will enforce a check to make sure that the output directory doesn't already exist as we don't want to
 // accidentally overwrite the files. We will only do this check if overwrite is false.
@@ -159,41 +154,80 @@ if (!params.input_vcf){
     // // https://gatk.broadinstitute.org/hc/en-us/articles/360035531652-FASTA-Reference-genome-format
     // TODO try to identify a way to better parallelise this process as it is very innefficient like this
     // Work on a per scaffold basis to start with.
-    process gatk_haplotype_caller_gvcf{
-        tag {pair_id}
-        container 'broadinstitute/gatk:4.2.0.0'
-        cpus params.gatk_haplotype_caller_cpus
+    if (split_haplotype_caller){
+        process gatk_haplotype_caller_gvcf_split{
+            tag {pair_id}
+            container 'broadinstitute/gatk:4.2.0.0'
+            cpus params.gatk_haplotype_caller_cpus
 
-        input:
-        each scaffold from Channel.fromList(scaffold_list)
-        tuple val(pair_id), path(merged), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from gatk_haplotype_caller_gvcf_ch.combine(gatk_haplotype_caller_ref_genome_ch)
+            input:
+            each scaffold from Channel.fromList(scaffold_list)
+            tuple val(pair_id), path(merged), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from gatk_haplotype_caller_gvcf_ch.combine(gatk_haplotype_caller_ref_genome_ch)
 
-        output:
-        tuple val(pair_id), val(scaffold), path("${pair_id}.${scaffold}.merged.g.vcf.gz") into genomics_db_import_ch
-        tuple val(pair_id), val(scaffold), path("${pair_id}.${scaffold}.merged.g.vcf.gz.tbi") into genomics_db_import_tbi_ch
+            output:
+            tuple val(pair_id), val(scaffold), path("${pair_id}.${scaffold}.merged.g.vcf.gz") into genomics_db_import_ch
+            tuple val(pair_id), val(scaffold), path("${pair_id}.${scaffold}.merged.g.vcf.gz.tbi") into genomics_db_import_tbi_ch
 
-        script:
-        """
-        gatk --java-options "-Xmx${params.haplotypecaller_max_mem}g" HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R $ref_genome -I ${merged[0]} -O ${pair_id}.${scaffold}.merged.g.vcf.gz -ERC GVCF -L $scaffold
-        """
-    }
+            script:
+            """
+            gatk --java-options "-Xmx${params.haplotypecaller_max_mem}g" HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R $ref_genome -I ${merged[0]} -O ${pair_id}.${scaffold}.merged.g.vcf.gz -ERC GVCF -L $scaffold
+            """
+        }
 
-    process genomics_db_import{
-        tag "${scaffold}"
-        cpus 1
-        container 'broadinstitute/gatk:4.2.0.0'
+        process genomics_db_import_split{
+            tag "${scaffold}"
+            cpus 1
+            container 'broadinstitute/gatk:4.2.0.0'
 
-        input:
-        tuple val(pair_id_list), val(scaffold), path(gvcf_list) from genomics_db_import_ch.groupTuple(by: 1)
-        tuple val(pair_id), val(scaffold), path(gvcf_tbi) from genomics_db_import_tbi_ch.groupTuple(by: 1)
-        
-        output:
-        tuple val(scaffold), file("genomicsdbi.out.${scaffold}") into genotype_GVCFs_ch
-        
-        script:
-        """
-        gatk  --java-options '-DGATK_STACKTRACE_ON_USER_EXCEPTION=true' GenomicsDBImport ${gvcf_list.collect { "-V $it " }.join()} --genomicsdb-workspace-path genomicsdbi.out.${scaffold} -L $scaffold --batch-size 50
-        """
+            input:
+            tuple val(pair_id_list), val(scaffold), path(gvcf_list) from genomics_db_import_ch.groupTuple(by: 1)
+            tuple val(pair_id), val(scaffold), path(gvcf_tbi) from genomics_db_import_tbi_ch.groupTuple(by: 1)
+            
+            output:
+            tuple val(scaffold), file("genomicsdbi.out.${scaffold}") into genotype_GVCFs_ch
+            
+            script:
+            """
+            gatk  --java-options '-DGATK_STACKTRACE_ON_USER_EXCEPTION=true' GenomicsDBImport ${gvcf_list.collect { "-V $it " }.join()} --genomicsdb-workspace-path genomicsdbi.out.${scaffold} -L $scaffold --batch-size 50
+            """
+        }
+    }else{
+        process gatk_haplotype_caller_gvcf_no_split{
+            tag {pair_id}
+            container 'broadinstitute/gatk:4.2.0.0'
+            cpus 1
+
+            input:
+            tuple val(pair_id), path(merged), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from gatk_haplotype_caller_gvcf_ch.combine(gatk_haplotype_caller_ref_genome_ch)
+
+            output:
+            tuple val(pair_id), path("${pair_id}.merged.g.vcf.gz") into genomics_db_import_ch
+            tuple val(pair_id), path("${pair_id}.merged.g.vcf.gz.tbi") into genomics_db_import_tbi_ch
+
+            script:
+            """
+            gatk --java-options "-Xmx${params.haplotypecaller_max_mem}g" HaplotypeCaller -R $ref_genome -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
+            """
+        }
+
+        process genomics_db_import_no_split{
+            tag "${scaffold}"
+            cpus 1
+            container 'broadinstitute/gatk:4.2.0.0'
+
+            input:
+            each scaffold from Channel.fromList(scaffold_list)
+            path(gvcf) from genomics_db_import_ch.collect{it[1]}
+            path(gvcf_tbi) from genomics_db_import_tbi_ch.collect{it[1]}
+            
+            output:
+            tuple val(scaffold), path("genomicsdbi.out.${scaffold}") into genotype_GVCFs_ch
+            
+            script:
+            """
+            gatk  --java-options '-DGATK_STACKTRACE_ON_USER_EXCEPTION=true' GenomicsDBImport ${gvcf.collect { "-V $it " }.join()} --genomicsdb-workspace-path genomicsdbi.out.${scaffold} -L $scaffold --batch-size 50
+            """
+        }
     }
 
     process GenotypeGVCFs{

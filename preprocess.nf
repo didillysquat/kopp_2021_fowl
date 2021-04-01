@@ -271,7 +271,7 @@ if (params.mapping == "ngm"){
     if (make_indices_from_scratch){
         process nextgenmap_indexing{
             conda 'envs/ngm.yaml'
-            cpus params.nextgenmap_threads
+            cpus params.mapping_threads
 
             input:
             path ref_genome from params.ref
@@ -293,7 +293,7 @@ if (params.mapping == "ngm"){
     process nextgenmap_mapping{
         tag "${pair_id}"
         conda 'envs/ngm.yaml'
-        cpus params.nextgenmap_threads
+        cpus params.mapping_threads
 
         input:
         tuple val(pair_id), file(paired), file(unpaired), path(ref_genome), path(ref_genome_indices) from ch_ngm_paired.join(ch_ngm_unpaired).combine(ngm_index_ch)
@@ -316,7 +316,7 @@ if (params.mapping == "ngm"){
             if (workflow.containerEngine == 'docker'){
                 containerOptions '-u $(id -u):$(id -g)'
             }
-            cpus params.nextgenmap_threads
+            cpus params.mapping_threads
 
             input:
             path ref_genome from params.ref
@@ -341,7 +341,7 @@ if (params.mapping == "ngm"){
         if (workflow.containerEngine == 'docker'){
             containerOptions '-u $(id -u):$(id -g)'
         }
-        cpus params.nextgenmap_threads
+        cpus params.mapping_threads
 
         input:
         tuple val(pair_id), file(paired), file(unpaired), path(ref_genome), path(ref_genome_indices) from ch_ngm_paired.join(ch_ngm_unpaired).combine(ngm_index_ch)
@@ -361,7 +361,7 @@ if (params.mapping == "ngm"){
     process samtools_sort{
         tag "${pair_id}"
         container 'singlecellpipeline/samtools:v0.0.3'
-        cpus params.nextgenmap_threads
+        cpus params.mapping_threads
 
         input:
         tuple val(pair_id), file(paired), file(unpaired_1), path(unpaired_2) from samtools_sort_ch
