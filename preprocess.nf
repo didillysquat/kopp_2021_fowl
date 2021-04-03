@@ -40,7 +40,8 @@ bin_dir = "${workflow.launchDir}/bin"
 envs_dir = "${workflow.launchDir}/envs"
 launch_dir = "${workflow.launchDir}"
 tru_seq_pe_fasta_path = "${workflow.launchDir}/TruSeq3-PE.fa"
-
+def tru_seq_file = new File("${tru_seq_pe_fasta_path}")
+if (!tru_seq_file.exists()) {throw new Exception("Could not find TruSeq3-PE.fa")}
 
 scaffold_list = {  
     def scaffolds = []
