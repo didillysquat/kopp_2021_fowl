@@ -8,3 +8,5 @@ GCF*
 sub_sampled_outputs
 bin/find_missing_file.py
 dev_nextflow.config
+2_bam_input_for_testing/
+bqsr_test_output/

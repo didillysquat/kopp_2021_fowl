@@ -324,7 +324,6 @@ if (!params.input_vcf){
         """
     }
 }else{
-    //TODO work with the common names rather than the params.bam_common_extension.
     // Then we have been provided with a vcf to hard filter from.
     // Can skip HaplotypeCaller, GenomicsDBImport and GenotypeGVCFs
     // Need to split the provided vcf by haplotype to pass into hard filtering
