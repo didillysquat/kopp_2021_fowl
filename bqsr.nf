@@ -427,7 +427,6 @@ process make_bqsr_tables{
     """
 }
 
-// TODO manually change the name of the output bai file. It is currently output as bam
 process apply_bqsr_tables{
     tag {pair_id}
     container 'broadinstitute/gatk:4.2.0.0'
