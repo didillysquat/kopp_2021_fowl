@@ -409,9 +409,13 @@ process gather_vcfs{
 // // We will want to use the fowl.vcf and the fowl.vcf.idx multiple times withhout using them up
 // // It may be that we have to output these files as values rather than path/files in the gather_vcf process.
 // // make_bqsr_tables_known_variants_ch.view()
+// NB The BaseRecalibrator process seems to use multiple threads and uses a lot of memory
+// I am struggling to get a logical response to setting the memory directive but setting the cpus to 4
+// appears to be working quite well. If not set, we run out of memory
 process make_bqsr_tables{
     tag {pair_id}
     container 'broadinstitute/gatk:4.2.0.0'
+    cpus 4
 
     input:
     tuple val(pair_id), path(merged_bam), path(known_variants), path(known_variants_idx), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from make_bqsr_tables_bam_ch.combine(make_bqsr_tables_known_variants_ch).combine(make_bqsr_tables_ref_genome_ch)
@@ -455,6 +459,7 @@ process apply_bqsr_tables{
 process make_bqsr_tables_round_2{
     tag {pair_id}
     container 'broadinstitute/gatk:4.2.0.0'
+    cpus 4
 
     input:
     tuple val(pair_id), path(merged_bam), path(known_variants), path(known_variants_idx), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from apply_bqsr_tables_round_2_ch.combine(make_bqsr_tables_known_variants_round_2_ch).combine(make_bqsr_tables_ref_genome_round_2_ch)
