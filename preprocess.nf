@@ -392,7 +392,7 @@ process merge_paired_and_unpaired{
 
     script:
     """
-    gatk MergeSamFiles --INPUT $paired --INPUT $unpaired_one --INPUT $unpaired_one --OUTPUT ${pair_id}.merged.mapped.sam
+    gatk MergeSamFiles --INPUT $paired --INPUT $unpaired_one --INPUT $unpaired_two --OUTPUT ${pair_id}.merged.mapped.sam
     """
 
 }
