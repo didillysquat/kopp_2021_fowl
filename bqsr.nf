@@ -440,15 +440,18 @@ process apply_bqsr_tables{
     tuple val(pair_id), path(merged_bam), path(table), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from apply_bqsr_tables_ch.combine(apply_bqsr_tables_ref_genome_ch)
 
     output:
-    tuple val(pair_id), path("${pair_id}.recalibrated.bam{,.bai}") into apply_bqsr_tables_out_ch,apply_bqsr_tables_round_2_ch
+    tuple val(pair_id), path("${pair_id}.recalibrated*.bam{,.bai}") into apply_bqsr_tables_out_ch,apply_bqsr_tables_round_2_ch
 
     script:
+    out_bam = merged_bam[0].getName().replaceAll(".bam", ".recalibrated.bam")
+    out_bam_index_original = merged_bam[0].getName().replaceAll(".bam", ".recalibrated.bai")
+    out_bam_index_new = merged_bam[0].getName().replaceAll(".bam", ".recalibrated.bam.bai")
     """
     gatk ApplyBQSR -R $ref_genome -I ${merged_bam[0]} \
     --bqsr-recal-file $table \
-    -O ${pair_id}.recalibrated.bam --create-output-bam-index
+    -O ${out_bam} --create-output-bam-index
     
-    mv ${pair_id}.recalibrated.bai ${pair_id}.recalibrated.bam.bai
+    mv ${out_bam_index_original} ${out_bam_index_new}
     """
 }
 
