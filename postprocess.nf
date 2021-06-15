@@ -38,13 +38,26 @@ gatk_vcf = file(params.gatk_vcf)
 gatk_vcf_tbi = file("${gatk_vcf}.tbi")
 bcftools_vcf = file(params.bcftools_vcf)
 bcftools_vcf_tbi = file("${bcftools_vcf}.tbi")
+params.output_dir = "${workflow.launchDir}/outputs/postprocess"
+read_publish_dir = [params.output_dir, "read"].join(File.separator)
+lcmlkin_publish_dir = [params.output_dir, "lcmlkin"].join(File.separator)
+ngsrelate_publish_dir = [params.output_dir, "ngsrelate"].join(File.separator)
 
-if (!(params.isec_theads)){
-    params.isec_threads = 50
+if (!(params.isec_threads)){
+    params.isec_threads = 1
+}
+
+if (!(params.lcmlkin_threads)){
+    params.lcmlkin_threads = 1
+}
+
+if (!(params.ngs_threads)){
+    params.ngs_threads = 1
 }
 
 process isec{
     container "halllab/bcftools:v1.9"
+    cpus params.isec_threads
 
     input:
     file gatk_vcf
@@ -58,7 +71,7 @@ process isec{
     script:
     """
     mkdir isec
-    bcftools isec $bcftools_vcf $gatk_vcf -p isec --threads ${params.isec_threads}
+    bcftools isec $bcftools_vcf $gatk_vcf -p isec --threads ${task.cpus}
     mv isec/0002.vcf postprocess.isec.0002.vcf
     """
     
@@ -92,7 +105,7 @@ process thin{
     path vcf_to_thin from thin_ch
 
     output:
-    path "postprocess.isec.0002.exMito.thinned.vcf" into lcmlkin_ch,read_ch,ngs_relate_ch
+    path "postprocess.isec.0002.exMito.thinned.vcf" into lcmlkin_ch,read_ch,ngsrelate_ch
 
     script:
     """
@@ -117,6 +130,7 @@ process read_make_tped_tfam{
 
 process read_run{
     container "didillysquat/read:latest"
+    publishDir: read_publish_dir, mode: "copy"
 
     input:
     tuple path(tped), path(tfam) from read_run_ch
@@ -128,5 +142,39 @@ process read_run{
     base_name = tped.getName().replaceAll(".tped", "")
     """
     READ.py $base_name
+    """
+}
+
+process lcmlkin{
+    container "didillysquat/lcmlkin:latest"
+    publishDir lcmlkin_publish_dir, mode: "copy"
+    cpus params.lcmlkin_threads
+
+    input:
+    path vcf_in from lcmlkin_ch
+
+    output:
+    tuple path("postprocess.isec.0002.exMito.thinned.lcmlkin.results"), path("postprocess.isec.0002.exMito.thinned.lcmlkin.results.log") into lcmlkin_out_ch
+
+    script:
+    """
+    lcmlkin -g all --likelihoodFormat phred -o postprocess.isec.0002.exMito.thinned.lcmlkin.results -i $vcf_in -t ${task.cpus}
+    """
+}
+
+process ngs_relate{
+    container "didillysquat/ngsrelate:latest"
+    publishDir ngsrelate_publish_dir, mode: "copy"
+    cpus params.ngsrelate_threads
+
+    input:
+    path vcf_in from ngsrelate_ch
+
+    output:
+    path("postprocess.isec.0002.exMito.thinned.ngsrelate.results") into lcmlkin_out_ch
+
+    script:
+    """
+    ngsRelate -h $vcf_in -O postprocess.isec.0002.exMito.thinned.ngsrelate.results -c 1 -p ${task.cpus}
     """
 }
