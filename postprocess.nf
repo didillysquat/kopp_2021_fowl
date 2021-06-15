@@ -51,8 +51,8 @@ if (!(params.lcmlkin_threads)){
     params.lcmlkin_threads = 1
 }
 
-if (!(params.ngs_threads)){
-    params.ngs_threads = 1
+if (!(params.ngsrelate_threads)){
+    params.ngsrelate_threads = 1
 }
 
 process isec{
@@ -162,7 +162,7 @@ process lcmlkin{
     """
 }
 
-process ngs_relate{
+process ngsrelate_threads{
     container "didillysquat/ngsrelate:latest"
     publishDir ngsrelate_publish_dir, mode: "copy"
     cpus params.ngsrelate_threads
