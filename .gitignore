@@ -10,3 +10,6 @@ bin/find_missing_file.py
 dev_nextflow.config
 2_bam_input_for_testing/
 bqsr_test_output/
+20210526_bqsr_2_output_dir
+20210610_bcftools_genotyping
+bcftools_genotype_test_output
