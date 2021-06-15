@@ -43,13 +43,14 @@ The research effort is focused on relatedness in wild Guineafowl with analyses a
 
 In particular the workflow is designed for organims for which there are no known/high confidence variant resources (e.g. dbSNP).
 
-This workflow is made up of three nextflow pipelines that perform:
+This workflow is made up of four nextflow pipelines that perform:
 
 1. Preprocessing of input fastq to bam files - preprocess.nf
 2. Base Quality Score Recalibration - bqsr.nf
-3. Genotyping - genotype.nf
+3. Genotyping (GATK- and bcftools-based) - genotype.nf
+4. Relatedness analysis - relatedness.nf
 
-As an example use of the workflow, to generate a set of variants using two sets of BQSR you would run preprocess.nf, bqsr.nf, bqsr.nf, genotype.nf. As part of running this set of pipelines, you would be able to assess the effect of each round of BQSR. If further rounds were deemed necessary, another set of bqsr.nf and genotype.nf could be run.
+As an example use of the workflow, to generate a set of variants using two rounds of BQSR you would run preprocess.nf, bqsr.nf, bqsr.nf, genotype.nf. As part of running this set of pipelines, you would be able to assess the effect of each round of BQSR. If further rounds were deemed necessary, another set of bqsr.nf and genotype.nf could be run.
 
 If no BQSR is required, the bqsr.nf pipeline can be ommitted from the workflow.
 
@@ -80,6 +81,11 @@ nextflow run bqsr.nf -profile <docker|singularity> --ref </path/to/your/ref/asse
 
 ```bash
 nextflow run genotyping.nf -profile <docker|singularity> --ref </path/to/your/ref/assembly.fna|fasta|fa> --input_dir </path/to/dir/with/bam/and/bam.bai/> 
+```
+
+### relatedness.nf quick start
+```bash
+nextflow run relatedness.nf -profile <docker|singularity> --gatk_vcfgz </path/to/your/the/gatk_vcf.vcf.gz> --bcftools_vcfgz </path/to/your/the/bcftools_vcf.vcf.gz> 
 ```
 
 ## Workflow summary
@@ -134,14 +140,43 @@ Same as above, but with steps 2-6 replaced with:
 
 ### genotype.nf summary
 
-#### **genotype.nf default pipeline (Currently only implemented with GATK)**
+genotype.nf may be run in three different modes:
+
+1. "both" (default): Will produce two vcf.gz{,.tbi} pairs, one using a GATK workflow (HaplotypeCaller --> GenomicsDBImport --> GenotypeGVCFs --> GatherVcfs), one using a bcftools workflow (bcftools mpileup --> bcftools call --> bcftools concat)
+2. "gatk" (`--mode gatk`): Will only produce the GATK-based vcf.gz{,.tbi} pairs
+3. "bcftools" (`--mode bcftools`): Will only produce the GATK-based vcf.gz{,.tbi} pairs
+
+The relatedness.nf workflow takes the two vcf pairs produced by this pipeline as input (i.e. one GATK-based, one bcftools-based).
+
+#### **genotype.nf default pipeline (--mode both)**
 
 - Create reference genome dictionary [[gatk CreateSequenceDictionary](https://gatk.broadinstitute.org/hc/en-us/articles/360046222771-CreateSequenceDictionary-Picard-)]
+- Create bcftools mpileup on per reference scaffold basis [[bcftools mpileup](http://samtools.github.io/bcftools/bcftools.html#mpileup)]
+- Call variants on per reference scaffold basis [[bcftools call](http://samtools.github.io/bcftools/bcftools.html#call)]
+- Concatenate per scaffold vcfs [[bcftools concat](http://samtools.github.io/bcftools/bcftools.html#concat)]
 - Create per sample GVCF [[gatk HaplotypeCaller](https://gatk.broadinstitute.org/hc/en-us/articles/360050814612-HaplotypeCaller)]
 - Create per sample GenomicsDB on a per reference scaffold basis [[gatk GenomicsDBImport](https://gatk.broadinstitute.org/hc/en-us/articles/360057439331-GenomicsDBImport)]
 - Perform joint genotyping on a per reference scaffold basis [[gatk GenotypeGVCFs](https://gatk.broadinstitute.org/hc/en-us/articles/360046224151-GenotypeGVCFs)]
 - Gather per scaffold vcfs into single vcf [[gatk GatherVcfs](https://gatk.broadinstitute.org/hc/en-us/articles/360046787092-GatherVcfs-Picard-)]
 - Collect genotyping metrics [[bcftools stats](https://github.com/samtools/samtools), [rtg vcfstats](https://github.com/RealTimeGenomics/rtg-tools)]
+
+### relatedness.nf summary
+
+relatedness.nf computes relatedness using three different packages:
+
+1. READ [manuscript]() [code](https://github.com/didillysquat/maximum-likelihood-relatedness-estimation)
+2. lcmlkin [manuscript]() [code](https://bitbucket.org/tguenther/read/src/master/)
+3. NgsRelate [manuscript]() [code](https://github.com/ANGSD/NgsRelate)
+
+Each are run using a docker image. The related Dockerfiles can be found [here](https://github.com/didillysquat/Dockerfiles).
+
+The pipeline takes two sets of .vcf.gz files and their associated .tbi files as input (one GATK-based, one bcftools-based), as output by the genotype.nf pipeline.
+
+It:
+- Works with the variants in common between the two vcf sets [bcftools isec](http://samtools.github.io/bcftools/bcftools.html#isec).
+- Removes a mitochondrial scaffold [optional] [vcftools](https://vcftools.github.io/man_latest.html)
+- Thins the sets of variants [vcftools](https://vcftools.github.io/man_latest.html) (`--remove-filtered-all --remove-indels --maf 0.025 --recode --recode-INFO-all --stdout --max-missing 0.75`)
+- Computes relatedness results.
 
 ## Documentation
 
@@ -189,7 +224,6 @@ The preprocess pipeline takes paired end fastq.gz files as input and outputs a s
 `--input_tsv`: The full path to the tab delimited file containing read group information. [example readgroup info tsv]()
 
 [Optional Arguments]
-TODO add memory and CPU optimisation arguments.
 
 `--subsample`: Subsample each sample to the number of reads specified with `--subsample_depth <depth>`.
 This option is useful during testing and development.
@@ -228,8 +262,12 @@ The fact that the BQSR process is cyclical in nature (ie. generating variants, t
 `--ref`: The full path to the reference genome assembly. It should be decompressed and in fasta format.
 
 [Optional Arguments]
-TODO add memory and CPU optimisation arguments.
+
 `--input_vcf`: The full path to a multi-sample vcf file containing the called variants for the samples in question. If running bqsr.nf after genotype.nf this will be the .vcf file in the `gatk_output_variants` directory. N.B. the corresponding .vcf.idx file must be in the same directory. If supplied, the first three steps of the BQSR pipeline are skipped saving a considerable ammount of computational time. By making use of of an input vcf file, we save computing variants twice when running genotype.nf followed by bqsr.nf.
+
+`--haplotypecaller_max_mem <int>`: The maximum heap memory for the GATK HaplotypeCaller in GB
+
+`--gatk_haplotype_caller_cpus <int>`: Threads to use for GATK HaplotypeCaller (argument to --native-pair-hmm-threads)
 
 #### **bqsr.nf outputs**
 
@@ -243,21 +281,67 @@ This is output because performing genotyping represents a large computational in
 **gatk_bqsr_analyze_covariates_metrics**: Metrics summarising the effects of running BQSR. Generated by running gatk AnalyzeCovariates. See [this GitHub issue](https://github.com/broadinstitute/gatk/issues/322) for further details.
 
 ### genotype.nf documentation
-genotype.nf takes a set of .bam and .bai files as input and outputs a multi-sample .vcf variant file containing genotype likelihood scores.
+genotype.nf takes a set of .bam and .bai files as input and outputs a two multi-sample .vcf.gz variant files containing genotype likelihood scores (one GATK-based, one bcftools-based).
+
+genotype.nf may be run in three different modes:
+
+1. "both" (default): Will produce two vcf.gz{,.tbi} pairs,
+one using a GATK workflow (HaplotypeCaller --> GenomicsDBImport --> GenotypeGVCFs --> GatherVcfs),
+one using a bcftools workflow (bcftools mpileup --> bcftools call --> bcftools concat)
+2. "gatk" (`--mode gatk`): Will only produce the GATK-based vcf.gz{,.tbi} pairs
+3. "bcftools" (`--mode bcftools`): Will only produce the GATK-based vcf.gz{,.tbi} pairs
 
 #### **genotype.nf arguments**
 
 [Required Aguments]
 
-`--input_dir`: The full path to the directory containing the set of .bam and .bam.bai files to call variants from. If running this after preprocess.nf, this will be the `output_bams` directory. If running this after bqsr.nf this will be the `gatk_bqsr_output_bams` directory.
+`--input_dir`: The full path to the directory containing the set of .bam and .bam.bai files to call variants from.
+If running this after preprocess.nf, this will be the `output_bams` directory.
+If running this after bqsr.nf this will be the `gatk_bqsr_output_bams` directory.
 
 `--ref`: The full path to the reference genome assembly. It should be decompressed and in fasta format.
 
 [Optional Arguments]
-TODO add memory and CPU optimisation arguments.
+`--haplotypecaller_max_mem <int>`: The maximum heap memory for the GATK HaplotypeCaller in GB
+
+`--gatk_haplotype_caller_cpus <int>`: Threads to use for GATK HaplotypeCaller (argument to --native-pair-hmm-threads)
 
 #### **genotype.nf outputs**
 
-**gatk_output_vcf_publishDir**: The multi-sample .vcf file containing the genotype likelihoods.
+**{gatk,bcftools}_output_vcf_publishDir**: The GATK- and bcftools-derived multi-sample .vcf files containing the genotype likelihoods.
 
-**gatk_vcf_stats_publishDir**: Summary statistics generated for the called genotypes. These files are especially useful in deciding the number of BQSR rounds to incorporate into the analysis.
+**{gatk,bcftools}_stats_publishDir**: Summary statistics generated for the GATK- and bcftools-called genotypes.
+These files are especially useful in deciding the number of BQSR rounds to incorporate into the analysis.
+
+### relatedness.nf documentation
+relatedness.nf computes relatedness using three different packages:
+
+1. READ [manuscript]() [code](https://github.com/didillysquat/maximum-likelihood-relatedness-estimation)
+2. lcmlkin [manuscript]() [code](https://bitbucket.org/tguenther/read/src/master/)
+3. NgsRelate [manuscript]() [code](https://github.com/ANGSD/NgsRelate)
+
+Each are run using a docker image. The related Dockerfiles can be found [here](https://github.com/didillysquat/Dockerfiles).
+
+The pipeline takes two sets of .vcf.gz files and their associated .tbi files as input (one GATK-based, one bcftools-based), as output by the genotype.nf pipeline.
+
+It:
+- Works with the variants in common between the two vcf sets [bcftools isec](http://samtools.github.io/bcftools/bcftools.html#isec).
+- Removes a mitochondrial scaffold [optional] [vcftools](https://vcftools.github.io/man_latest.html)
+- Thins the sets of variants [vcftools](https://vcftools.github.io/man_latest.html) (`--remove-filtered-all --remove-indels --maf 0.025 --recode --recode-INFO-all --stdout --max-missing 0.75`)
+- Computes relatedness results.
+
+#### **relatedness.nf arguments**
+
+[Required Arguments]
+`--gatk_vcfgz`: Full path to the gatk-produced .vcf.gz file. The associated .vcf.gz.tbi file must be in the same directory.
+
+`--bcftools_vcfgz`: Full path to the bcftools-produced .vcf.gz file. The associated .vcf.gz.tbi file must be in the same directory.
+
+[Optional Arguments]
+`--mito_scaff <string>`: Name of a scaffold to be excluded from the .vcf files.
+
+`--isec_threads <int>`: Number of threads used in bcftools isec.
+
+`--lcmlkin_threads <int>`: Number of threads to use for lcmlkin.
+
+`--ngsrelate_threads <int>`: Number of threads to use for NgsRealte.

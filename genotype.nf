@@ -125,12 +125,11 @@ if (params.mode == "bcftools"){
 }else if (params.mode == "gatk"){
     index_dictionary_refgenome_out_ch.into{gatk_haplotype_caller_ref_genome_ch; GenotypeGVCFs_ref_genome_ch; bcftools_vcfstats_ref_genome_ch}
     input_bam_ch.into{gatk_haplotype_caller_gvcf_ch}
-}else if (params.mode == "both"){
-    // Default
+}else{
+    // Default = "both"
+    params.mode = "both"
     index_dictionary_refgenome_out_ch.into{gatk_haplotype_caller_ref_genome_ch; GenotypeGVCFs_ref_genome_ch; bcftools_vcfstats_ref_genome_ch}
     input_bam_ch.into{bcftools_mpileup_ch; gatk_haplotype_caller_gvcf_ch}
-}else{
-    throw new Exception("""Genotyping mode must be provided: \"--mode both\" or \"--mode gatk\" or \"--mode bcftools\"""")
 }
 
 // START OF BCFTOOLS MPILEUP AND CALLING
