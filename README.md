@@ -269,6 +269,8 @@ The fact that the BQSR process is cyclical in nature (ie. generating variants, t
 
 `--gatk_haplotype_caller_cpus <int>`: Threads to use for GATK HaplotypeCaller (argument to --native-pair-hmm-threads)
 
+`--split_haplotype_caller`: If passed the gatk HaplotypeCaller will be split by sample and by scaffold. This creates a large number of processes that may speed up the pipeline if sufficient CPUs are available.
+
 #### **bqsr.nf outputs**
 
 **gatk_bqsr_output_vcf**: The multi-sample .vcf file containing genotype likelihoods generated as part of the bqsr pipeline.
@@ -306,6 +308,8 @@ If running this after bqsr.nf this will be the `gatk_bqsr_output_bams` directory
 
 `--gatk_haplotype_caller_cpus <int>`: Threads to use for GATK HaplotypeCaller (argument to --native-pair-hmm-threads)
 
+`--split_haplotype_caller`: If passed the gatk HaplotypeCaller will be split by sample and by scaffold. This creates a large number of processes that may speed up the pipeline if sufficient CPUs are available.
+
 #### **genotype.nf outputs**
 
 **{gatk,bcftools}_output_vcf_publishDir**: The GATK- and bcftools-derived multi-sample .vcf files containing the genotype likelihoods.
@@ -314,17 +318,19 @@ If running this after bqsr.nf this will be the `gatk_bqsr_output_bams` directory
 These files are especially useful in deciding the number of BQSR rounds to incorporate into the analysis.
 
 ### relatedness.nf documentation
+
 relatedness.nf computes relatedness using three different packages:
 
-1. READ [manuscript]() [code](https://github.com/didillysquat/maximum-likelihood-relatedness-estimation)
-2. lcmlkin [manuscript]() [code](https://bitbucket.org/tguenther/read/src/master/)
-3. NgsRelate [manuscript]() [code](https://github.com/ANGSD/NgsRelate)
+1. READ [manuscript](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0195491) [code](https://github.com/didillysquat/maximum-likelihood-relatedness-estimation)
+2. lcmlkin [manuscript](https://www.biorxiv.org/content/10.1101/023374v1) [code](https://bitbucket.org/tguenther/read/src/master/)
+3. NgsRelate [manuscript](https://academic.oup.com/gigascience/article/8/5/giz034/5481763) [code](https://github.com/ANGSD/NgsRelate)
 
 Each are run using a docker image. The related Dockerfiles can be found [here](https://github.com/didillysquat/Dockerfiles).
 
 The pipeline takes two sets of .vcf.gz files and their associated .tbi files as input (one GATK-based, one bcftools-based), as output by the genotype.nf pipeline.
 
 It:
+
 - Works with the variants in common between the two vcf sets [bcftools isec](http://samtools.github.io/bcftools/bcftools.html#isec).
 - Removes a mitochondrial scaffold [optional] [vcftools](https://vcftools.github.io/man_latest.html)
 - Thins the sets of variants [vcftools](https://vcftools.github.io/man_latest.html) (`--remove-filtered-all --remove-indels --maf 0.025 --recode --recode-INFO-all --stdout --max-missing 0.75`)
@@ -333,11 +339,13 @@ It:
 #### **relatedness.nf arguments**
 
 [Required Arguments]
+
 `--gatk_vcfgz`: Full path to the gatk-produced .vcf.gz file. The associated .vcf.gz.tbi file must be in the same directory.
 
 `--bcftools_vcfgz`: Full path to the bcftools-produced .vcf.gz file. The associated .vcf.gz.tbi file must be in the same directory.
 
 [Optional Arguments]
+
 `--mito_scaff <string>`: Name of a scaffold to be excluded from the .vcf files.
 
 `--isec_threads <int>`: Number of threads used in bcftools isec.
@@ -345,3 +353,11 @@ It:
 `--lcmlkin_threads <int>`: Number of threads to use for lcmlkin.
 
 `--ngsrelate_threads <int>`: Number of threads to use for NgsRealte.
+
+#### **relatedness.nf outputs**
+
+**read**: Outputs from the read
+
+**lcmlkin**: Outputs from the lcmlkin
+
+**ngsrelate**: Outputs from NgsRelate
