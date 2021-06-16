@@ -45,7 +45,7 @@ the differences before and after the BQSR.
 
 bin_dir = "${workflow.launchDir}/bin"
 params.overwrite = false
-split_haplotype_caller = true
+params.split_haplotype_caller = false
 
 params.output_dir = "${workflow.launchDir}/outputs/bqsr"
 gatk_bqsr_vcf_publishDir = [params.output_dir, "gatk_bqsr_output_vcf"].join(File.separator)
@@ -154,7 +154,7 @@ if (!params.input_vcf){
     // // https://gatk.broadinstitute.org/hc/en-us/articles/360035531652-FASTA-Reference-genome-format
     // TODO try to identify a way to better parallelise this process as it is very innefficient like this
     // Work on a per scaffold basis to start with.
-    if (split_haplotype_caller){
+    if (params.split_haplotype_caller){
         process gatk_haplotype_caller_gvcf_split{
             tag {pair_id}
             container 'broadinstitute/gatk:4.2.0.0'
