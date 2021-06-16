@@ -2,7 +2,7 @@ import sys
 
 rtg_path = sys.argv[1]
 try:
-    outfile = str(sys.argv[2])
+    out_file = str(sys.argv[2])
 except IndexError:
     rtg_iteration = None
     out_file = f"rtg.stats.summary.txt"
