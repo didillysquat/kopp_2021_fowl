@@ -14,3 +14,10 @@ bqsr_test_output/
 20210610_bcftools_genotyping
 bcftools_genotype_test_output
 testing_both_genotype_subsampled/
+
+20210317_preprocessing_output_dir
+20210317_variant_calling_0_output_dir
+20210403_bqsr_0_output_dir
+20210403_bqsr_1_output_dir
+20210609_variant_calling_output_dir
+nextflow.prod.config
