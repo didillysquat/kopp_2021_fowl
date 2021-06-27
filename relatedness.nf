@@ -34,10 +34,10 @@ read: https://bitbucket.org/tguenther/read/src/master/
 NgsRelate: https://github.com/ANGSD/NgsRelate
 */
 
-gatk_vcfgz = file(params.gatk_vcf)
-gatk_vcf_tbi = file("${gatk_vcf}.tbi")
-bcftools_vcfgz = file(params.bcftools_vcf)
-bcftools_vcf_tbi = file("${bcftools_vcf}.tbi")
+gatk_vcfgz = file(params.gatk_vcfgz)
+gatk_vcfgz_tbi = file("${gatk_vcfgz}.tbi")
+bcftools_vcfgz = file(params.bcftools_vcfgz)
+bcftools_vcfgz_tbi = file("${bcftools_vcfgz}.tbi")
 params.output_dir = "${workflow.launchDir}/outputs/relatedness"
 read_publish_dir = [params.output_dir, "read"].join(File.separator)
 lcmlkin_publish_dir = [params.output_dir, "lcmlkin"].join(File.separator)
@@ -45,6 +45,7 @@ ngsrelate_publish_dir = [params.output_dir, "ngsrelate"].join(File.separator)
 
 // We will enforce a check to make sure that the output directory doesn't already exist as we don't want to
 // accidentally overwrite the files. We will only do this check if overwrite is false.
+
 if(!params.overwrite){
     // Check to see if each of the output dirs already exist
     def path_to_check = new File(params.output_dir);
@@ -71,10 +72,10 @@ process isec{
     cpus params.isec_threads
 
     input:
-    file gatk_vcf
-    file gatk_vcf_tbi
-    file bcftools_vcf
-    file bcftools_vcf_tbi
+    file gatk_vcfgz
+    file gatk_vcfgz_tbi
+    file bcftools_vcfgz
+    file bcftools_vcfgz_tbi
 
     output:
     path("relatedness.isec.0002.vcf") into exclude_mito_scaff_ch
@@ -82,7 +83,7 @@ process isec{
     script:
     """
     mkdir isec
-    bcftools isec $bcftools_vcf $gatk_vcf -p isec --threads ${task.cpus}
+    bcftools isec $bcftools_vcfgz $gatk_vcfgz -p isec --threads ${task.cpus}
     mv isec/0002.vcf relatedness.isec.0002.vcf
     """
     
@@ -130,7 +131,7 @@ process read_make_tped_tfam{
     path read_vcf from read_ch
 
     output:
-    tuple path("relatedness.isec.0002.exMito.thinned.tped"), path("relatedness.isec.0002.exMito.thinned.tfam") read_run_ch
+    tuple path("relatedness.isec.0002.exMito.thinned.tped"), path("relatedness.isec.0002.exMito.thinned.tfam") into read_run_ch
 
     script:
     """
@@ -140,7 +141,7 @@ process read_make_tped_tfam{
 
 process read_run{
     container "didillysquat/read:latest"
-    publishDir: read_publish_dir, mode: "copy"
+    publishDir read_publish_dir, mode: "copy"
 
     input:
     tuple path(tped), path(tfam) from read_run_ch
@@ -181,7 +182,7 @@ process ngsrelate_threads{
     path vcf_in from ngsrelate_ch
 
     output:
-    path("relatedness.isec.0002.exMito.thinned.ngsrelate.results") into lcmlkin_out_ch
+    path("relatedness.isec.0002.exMito.thinned.ngsrelate.results") into ngsrelate_threads_out_ch
 
     script:
     """
