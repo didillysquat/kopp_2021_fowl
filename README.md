@@ -11,6 +11,7 @@
   - [preprocess.nf quick start](#preprocessnf-quick-start)
   - [bqsr.nf quick start](#bqsrnf-quick-start)
   - [genotype.nf quick start](#genotypenf-quick-start)
+  - [relatedness.nf quick start](#relatednessnf-quick-start)]
 - [Workflow summary](#workflow-summary)
   - [preprocess.nf summary](#preprocessnf-summary)
     - [preprocess.nf default pipeline](#preprocessnf-default-pipeline)
@@ -20,6 +21,7 @@
     - [bqsr.nf default pipeline (with VCF provided as input)](#bqsrnf-default-pipeline-with-vcf-provided-as-input)
   - [genotype.nf summary](#genotypenf-summary)
     - [genotype.nf default pipeline (Currently only implemented with GATK)](#genotypenf-default-pipeline-currently-only-implemented-with-gatk)
+  - [relatedness.nf summary](#relatednessnf-summary)
 - [Documentation](#documentation)
   - [General documentation](#general-documentation)
     - [Nextflow arguments](#nextflow-arguments)
@@ -34,6 +36,9 @@
   - [genotype.nf documentation](#genotypenf-documentation)
     - [genotype.nf arguments](#genotypenf-arguments)
     - [genotype.nf outputs](#genotypenf-outputs)
+  - [relatedness.nf documentation](#relatednessnf-documentation)
+    - [relatedness.nf arguments](#relatednessnf-arguments)
+    - [relatedness.nf outputs](#relatednessnf-outputs)
 
 ## Introduction
 
@@ -355,6 +360,8 @@ It:
 `--ngsrelate_threads <int>`: Number of threads to use for NgsRealte.
 
 #### **relatedness.nf outputs**
+
+**thinned_vcf**: The thinned .vcf file used as input to the to the relateness calculations.
 
 **read**: Outputs from the read
 
