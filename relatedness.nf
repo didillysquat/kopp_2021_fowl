@@ -42,6 +42,7 @@ params.output_dir = "${workflow.launchDir}/outputs/relatedness"
 read_publish_dir = [params.output_dir, "read"].join(File.separator)
 lcmlkin_publish_dir = [params.output_dir, "lcmlkin"].join(File.separator)
 ngsrelate_publish_dir = [params.output_dir, "ngsrelate"].join(File.separator)
+thinned_vcf_publish_dir = [params.output_dir, "thinned_vcf"].join(File.separator)
 
 // We will enforce a check to make sure that the output directory doesn't already exist as we don't want to
 // accidentally overwrite the files. We will only do this check if overwrite is false.
@@ -93,6 +94,9 @@ process isec{
 if (params.mito_scaff){
     process exclude_mito_scaff{
         container  "biocontainers/vcftools:v0.1.16-1-deb_cv1"
+        if (workflow.containerEngine == 'docker'){
+            containerOptions '-u $(id -u):$(id -g)'
+        }
 
         input:
         path(isec_vcf) from exclude_mito_scaff_ch
@@ -111,6 +115,10 @@ if (params.mito_scaff){
 
 process thin{
     container "biocontainers/vcftools:v0.1.16-1-deb_cv1"
+    publishDir thinned_vcf_publish_dir, mode: "copy"
+    if (workflow.containerEngine == 'docker'){
+            containerOptions '-u $(id -u):$(id -g)'
+        }
 
     input:
     path vcf_to_thin from thin_ch
@@ -126,6 +134,9 @@ process thin{
 
 process read_make_tped_tfam{
     container "biocontainers/vcftools:v0.1.16-1-deb_cv1"
+    if (workflow.containerEngine == 'docker'){
+            containerOptions '-u $(id -u):$(id -g)'
+        }
 
     input:
     path read_vcf from read_ch
@@ -135,7 +146,7 @@ process read_make_tped_tfam{
 
     script:
     """
-    vcftools --vcf $read_vcf --plink-tped
+    vcftools --vcf $read_vcf --plink-tped --out relatedness.isec.0002.exMito.thinned
     """
 }
 
