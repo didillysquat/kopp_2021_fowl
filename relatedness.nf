@@ -158,7 +158,7 @@ process read_run{
     tuple path(tped), path(tfam) from read_run_ch
 
     output:
-    tuple path("READ_results"), path("READ_results_plot.pdf") into read_out_ch
+    tuple path("READ_results"), path("READ_results_plot.pdf"), path("READ_output_ordered"), path("Read_intermediate_output"), path("meansP0_AncientDNA_normalized") into read_out_ch
 
     script:
     base_name = tped.getName().replaceAll(".tped", "")
@@ -197,6 +197,7 @@ process ngsrelate_threads{
 
     script:
     """
-    ngsRelate -h $vcf_in -O relatedness.isec.0002.exMito.thinned.ngsrelate.results -c 1 -p ${task.cpus}
+    awk '/#CHROM/ {for(i=10; i<=NF; i++){print \$i}}' relatedness.isec.0002.exMito.thinned.vcf > sample_names.txt
+    ngsRelate -h $vcf_in -O relatedness.isec.0002.exMito.thinned.ngsrelate.results -c 1 -p ${task.cpus} -z sample_names.txt
     """
 }
