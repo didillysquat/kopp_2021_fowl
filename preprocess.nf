@@ -43,6 +43,13 @@ tru_seq_pe_fasta_path = "${workflow.launchDir}/TruSeq3-PE.fa"
 def tru_seq_file = new File("${tru_seq_pe_fasta_path}")
 if (!tru_seq_file.exists()) {throw new Exception("Could not find TruSeq3-PE.fa")}
 
+if (!params.trimmomatic_threads){
+    params.trimmomatic_threads = 1
+}
+if (!params.mapping_threads){
+    params.mapping_threads = 1
+}
+
 scaffold_list = {  
     def scaffolds = []
     new File(params.ref).eachLine {
