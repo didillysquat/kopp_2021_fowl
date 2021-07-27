@@ -148,6 +148,9 @@ if (params.subsample){
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics_sub_${params.subsample_depth}"].join(File.separator)
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient_sub_${params.subsample_depth}"].join(File.separator)
     mosdepth_sequencing_coverage_publishDir = [params.output_dir, "mosdepth_sequencing_coverage_sub_${params.subsample_depth}"].join(File.separator)
+    samtools_coverage_stats_publishDir = [params.output_dir, "samtools_coverage_stats_sub_${params.subsample_depth}"].join(File.separator)
+    samtools_mapping_stats_publishDir = [params.output_dir, "samtools_mapping_stats_sub_${params.subsample_depth}"].join(File.separator)
+    preprocessing_summary_publishDir = [params.output_dir, "preprocessing_summary_sub_${params.subsample_depth}"].join(File.separator)
 }else{
     params.output_dir = "${workflow.launchDir}/outputs/pre_processing"
     fastqc_pre_trim_publish_dir = [params.output_dir, "fastqc_pre_trim"].join(File.separator)
@@ -158,8 +161,12 @@ if (params.subsample){
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics"].join(File.separator)
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient"].join(File.separator)
     mosdepth_sequencing_coverage_publishDir = [params.output_dir, "mosdepth_sequencing_coverage"].join(File.separator)
+    samtools_coverage_stats_publishDir = [params.output_dir, "samtools_coverage_stats"].join(File.separator)
+    samtools_mapping_stats_publishDir = [params.output_dir, "samtools_mapping_stats"].join(File.separator)
+    preprocessing_summary_publishDir = [params.output_dir, "preprocessing_summary"].join(File.separator)
 }
 
+input_tsv = file(params.input_tsv)
 // START OF PRE PROCESSING
 /* 
 If subsample, create a channel that will pass into the subsampling process and then pass the subsampled
@@ -263,12 +270,14 @@ process fastqc_post_trim{
     tuple val(pair_id), file(paired_files), file(unpaired_files) from ch_fastqc_post_trim_paired.join(ch_fastqc_post_trim_unpaired)
 
     output:
-    tuple file("${pair_id}*1P*fastqc.html"), file("${pair_id}*2P*fastqc.html") into ch_fastqc_post_trim_output
+    tuple file("${pair_id}*1P*fastqc.html"), file("${pair_id}*2P*fastqc.html"), file("${pair_id}*1U*fastqc.html"), file("${pair_id}*2U*fastqc.html") into ch_fastqc_post_trim_output
 
     script:
     """
     fastqc -t 2 -o . ${paired_files[0]}
     fastqc -t 2 -o . ${paired_files[1]}
+    fastqc -t 2 -o . ${unpaired_files[0]}
+    fastqc -t 2 -o . ${unpaired_files[1]}
     """
 }
 
@@ -435,7 +444,7 @@ process markduplicates_spark{
     tuple val(pair_id), file(merged) from mark_duplicates_ch
 
     output:
-    tuple val(pair_id), file("${pair_id}.merged.deduplicated.sorted.bam{,.bai}") into collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mosdepth_sequencing_coverage_ch
+    tuple val(pair_id), file("${pair_id}.merged.deduplicated.sorted.bam{,.bai}") into collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mosdepth_sequencing_coverage_ch,samtools_depth_stats_ch,samtools_mapping_stats_ch,perprocess_overview_bams_ch
     file("${pair_id}.merged.deduplicated.sorted.metrics.txt") into mark_duplicate_metrics_ch
 
     script:
@@ -529,6 +538,63 @@ process mosdepth_plot_seq_coverage{
     script:
     """
     python3 ${bin_dir}/plot-dist.py -o ${pair_id}.merged.mostdepth.html ${merged}
+    """
+}
+
+process samtools_mapping_stats{
+    tag "${sample}"
+    publishDir samtools_mapping_stats_publishDir, mode: "copy"
+    container 'singlecellpipeline/samtools:v0.0.3'
+
+    input:
+    tuple val(sample), path(bam) from samtools_mapping_stats_ch
+
+    output:
+    path "${sample}.bam.stats.txt" into samtools_stats_out
+
+    script:
+    """
+    samtools stats ${bam[0]} > ${sample}.bam.stats.txt
+    """
+}
+
+process samtools_coverage_stats{
+    tag "${sample}"
+    publishDir samtools_coverage_stats_publishDir, mode: "copy"
+    container 'singlecellpipeline/samtools:v0.0.3'
+
+    input:
+    tuple val(sample), path(bam) from samtools_depth_stats_ch
+
+    output:
+    path "${sample}.depth.txt" into samtools_depth_out
+
+    script:
+    """
+    samtools depth -a ${bam[0]} | LC_NUMERIC=en_US.UTF-8 awk '{sum+=\$3; sumsq+=\$3*\$3} END { print "Average = ",sum/NR; print "Stdev = ",sqrt(sumsq/NR - (sum/NR)^2)}' > ${sample}.depth.txt
+    """
+}
+
+process preprocess_summary{
+    tag "preprocess_summary"
+    publishDir preprocessing_summary_publishDir, mode: "copy"
+    container 'amancevice/pandas:1.3.1'
+
+    input:
+    path pretrim from ch_fastqc_pre_trim_output.collect()
+    path posttrim from ch_fastqc_post_trim_output.collect()
+    path bams from perprocess_overview_bams_ch.collect{it[1]}
+    path depth from samtools_depth_out.collect()
+    path mapping from samtools_stats_out.collect()
+    path duplication_metric from mark_duplicate_metrics_ch.collect()
+    path input_tsv
+    
+    output:
+    path "preprocessing_overview.tsv" into preprocess_summary_out_ch
+
+    script:
+    """
+    python3 ${bin_dir}/pre_process_stats_overview.py \$PWD
     """
 }
 // END OF EVALUATION METRICS
