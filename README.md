@@ -107,7 +107,7 @@ nextflow run relatedness.nf -profile <docker|singularity> --gatk_vcfgz </path/to
 - Read merging [[gatk MergeSamFiles](https://gatk.broadinstitute.org/hc/en-us/articles/360046788832-MergeSamFiles-Picard-)]
 - Annotation with read group headers [[gatk AddOrReplaceReadGroups](https://gatk.broadinstitute.org/hc/en-us/articles/360041850851-AddOrReplaceReadGroups-Picard-)]
 - Remove duplicate reads [[gatk MarkDuplicatesSpark](https://gatk.broadinstitute.org/hc/en-us/articles/360057438771-MarkDuplicatesSpark)]
-- Collect read metrics [GC metrics: [gatk CollectGcBiasMetrics](), PCR bottleneck coefficient, sequencing coverage: [mosdepth](https://github.com/brentp/mosdepth)]
+- Collect read metrics [GC metrics: [gatk CollectGcBiasMetrics](https://gatk.broadinstitute.org/hc/en-us/articles/360057440351-CollectGcBiasMetrics-Picard-), PCR bottleneck coefficient, sequencing coverage: [mosdepth](https://github.com/brentp/mosdepth), sequencing coverage: [samtools depth](http://www.htslib.org/doc/samtools-depth.html), mapping stats: [samtools stats](http://www.htslib.org/doc/samtools-stats.html)]
 
 #### **preprocess.nf alternative options**
 
@@ -250,6 +250,12 @@ This option is useful during testing and development.
 **pcr_bottleneck_coefficient**: PCR bottleneck calculation results
 
 **mosdepth_sequencing_coverage**: Sequence coverage / depth results
+
+**samtools_mapping_stats**: Samtools mapping statistics
+
+**samtools_coverage_stats**: Samtools coverage statistics
+
+**preprocessing_summary**: .tsv summary table
 
 ### bqsr.nf documentation
 Takes a set of BAM files as input and outputs a set of BAM files after applying a round of BQSR to them.
