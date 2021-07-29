@@ -21,7 +21,7 @@ class PreProcSummary:
             "reads_pre_trim_one", "reads_pre_trim_two", "reads_pre_trim_total", "reads_post_trim_one",
             "reads_post_trim_two", "reads_post_trim_total", "reads_trimmed_lost_one", "reads_trimmed_lost_two", "reads_trimmed_lost_total",
             "reads_trimmed_lost_total_percent", "reads_mapped", "reads_mapped_and_paired", "reads_unmapped",
-            "reads_mapped_percent", "average_coverage", "average_coverarge_stdev", "unpaired_reads_examined_for_deduplication",
+            "reads_mapped_percent", "average_coverage", "average_coverage_stdev", "unpaired_reads_examined_for_deduplication",
             "paired_reads_examined_for_deduplication", "unpaired_read_duplicated", "paired_read_duplicates", "percent_duplication",
             "sequenced_library_complexity", "estimated_library_complexity", "percent_library_sequenced"
             ]
@@ -139,7 +139,7 @@ class PreProcSummary:
             if average_coverage is None or coverage_stdev is None:
                 raise RuntimeError(f"Error in extracting coverage stats for {sample}")
             self.summary_df.at[sample, "average_coverage"] = average_coverage
-            self.summary_df.at[sample, "average_coverarge_stdev"] = coverage_stdev
+            self.summary_df.at[sample, "average_coverage_stdev"] = coverage_stdev
         print("\n")
 
         print("Collecting complexity stats")
