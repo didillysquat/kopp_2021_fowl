@@ -21,8 +21,8 @@ class PreProcSummary:
             "reads_pre_trim_one", "reads_pre_trim_two", "reads_pre_trim_total", "reads_post_trim_one",
             "reads_post_trim_two", "reads_post_trim_total", "reads_trimmed_lost_one", "reads_trimmed_lost_two", "reads_trimmed_lost_total",
             "reads_trimmed_lost_total_percent", "reads_mapped", "reads_mapped_and_paired", "reads_unmapped",
-            "reads_mapped_percent", "average_coverage", "average_coverarge_stdev", "unpaired_reads_examined_for_duplication",
-            "paired_reads_examined_for_duplication", "unpaired_read_duplicated", "paired_read_duplicates", "percent_duplication",
+            "reads_mapped_percent", "average_coverage", "average_coverarge_stdev", "unpaired_reads_examined_for_deduplication",
+            "paired_reads_examined_for_deduplication", "unpaired_read_duplicated", "paired_read_duplicates", "percent_duplication",
             "sequenced_library_complexity", "estimated_library_complexity", "percent_library_sequenced"
             ]
 
@@ -153,16 +153,16 @@ class PreProcSummary:
             for i, line in enumerate(lines):
                 if line.startswith("LIBRARY"):
                     components = lines[i+1].split()
-                    unpaired_reads_examined_for_duplication = int(components[1])
-                    paired_reads_examined_for_duplication = int(components[2])
+                    unpaired_reads_examined_for_deduplication = int(components[1])
+                    paired_reads_examined_for_deduplication = int(components[2])
                     unpaired_read_duplicated = int(components[5])
                     paired_read_duplicates = int(components[6])
                     percent_duplication = float(components[8])
                     sequenced_library_complexity = int(components[9])
                     break
 
-            self.summary_df.at[sample, "unpaired_reads_examined_for_duplication"] = unpaired_reads_examined_for_duplication
-            self.summary_df.at[sample, "paired_reads_examined_for_duplication"] = paired_reads_examined_for_duplication
+            self.summary_df.at[sample, "unpaired_reads_examined_for_deduplication"] = unpaired_reads_examined_for_deduplication
+            self.summary_df.at[sample, "paired_reads_examined_for_deduplication"] = paired_reads_examined_for_deduplication
             self.summary_df.at[sample, "unpaired_read_duplicated"] = unpaired_read_duplicated
             self.summary_df.at[sample, "paired_read_duplicates"] = paired_read_duplicates
             self.summary_df.at[sample, "percent_duplication"] = percent_duplication
