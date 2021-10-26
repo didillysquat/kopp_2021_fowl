@@ -50,6 +50,12 @@ if (!params.mapping_threads){
     params.mapping_threads = 1
 }
 
+params.remake_indices = false;
+
+if (!params.subsample){
+    params.subsample = false;
+}
+
 scaffold_list = {  
     def scaffolds = []
     new File(params.ref).eachLine {
