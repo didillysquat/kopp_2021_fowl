@@ -600,7 +600,7 @@ process preprocess_summary{
 
     script:
     """
-    python3 ${bin_dir}/pre_process_stats_overview.py \$PWD
+    python3 ${bin_dir}/pre_process_stats_overview.py \$PWD $input_tsv
     """
 }
 // END OF EVALUATION METRICS

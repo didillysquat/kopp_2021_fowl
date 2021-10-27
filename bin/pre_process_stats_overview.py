@@ -13,7 +13,7 @@ import re
 class PreProcSummary:
     def __init__(self):
         self.cwd = sys.argv[1]
-        self.tsv_path = os.path.join(self.cwd, "file_list.tsv")
+        self.tsv_path = os.path.join(self.cwd, sys.argv[2])
 
         # These are the headers/metrics that we will pull out of the output files from the above directories and populate the output df with
         self.columns = [
