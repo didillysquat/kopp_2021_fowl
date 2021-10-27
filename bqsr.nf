@@ -79,7 +79,7 @@ scaffold_list = {
 // Call variants on a per scaffold (chromosone) basis.
 // Follow a scatter-gather strategy 
 // (first three steps can be skipped if provided with a vcf to hard filter from)
-// (if a vcf is provided at input, an additional step 4a spites the vcf per scaffold for filtering)
+// (if a vcf is provided at input, an additional step 4a splits the vcf per scaffold for filtering)
 // 1 - Call haplotypes on a per sample basis
 // 2 - run GenomicsDBImport on a per scaffold basis
 // 3 - run GenotypeGVCFs on a per scaffold basis.
@@ -195,7 +195,7 @@ if (!params.input_vcf){
         process gatk_haplotype_caller_gvcf_no_split{
             tag {pair_id}
             container 'broadinstitute/gatk:4.2.0.0'
-            cpus 1
+            cpus params.gatk_haplotype_caller_cpus
 
             input:
             tuple val(pair_id), path(merged), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from gatk_haplotype_caller_gvcf_ch.combine(gatk_haplotype_caller_ref_genome_ch)
@@ -206,7 +206,7 @@ if (!params.input_vcf){
 
             script:
             """
-            gatk --java-options "-Xmx${params.haplotypecaller_max_mem}g" HaplotypeCaller -R $ref_genome -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
+            gatk --java-options "-Xmx${params.haplotypecaller_max_mem}g" --native-pair-hmm-threads ${task.cpus} HaplotypeCaller -R $ref_genome -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
             """
         }
 
