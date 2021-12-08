@@ -43,6 +43,12 @@ gatk_vcf_stats_publishDir = [params.output_dir, "gatk_vcf_stats"].join(File.sepa
 bcftools_call_publishDir = [params.output_dir, "bcftools_output_vcf"].join(File.separator)
 bcftools_vcf_stats_publishDir = [params.output_dir, "bcftools_vcf_stats"].join(File.separator)
 
+if (!params.haplotypecaller_max_mem){
+    params.haplotypecaller_max_mem = 8
+}
+if (!params.gatk_haplotype_caller_cpus){
+    params.gatk_haplotype_caller_cpus = 4
+}
 
 // We will enforce a check to make sure that the output directory doesn't already exist as we don't want to
 // accidentally overwrite the files. We will only do this check if overwrite is false.
@@ -244,7 +250,7 @@ if (params.mode == "both" || params.mode == "gatk"){
         process gatk_haplotype_caller_gvcf_no_split{
             tag {pair_id}
             container 'broadinstitute/gatk:4.2.0.0'
-            cpus 1
+            cpus params.gatk_haplotype_caller_cpus
 
             input:
             tuple val(pair_id), path(merged), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from gatk_haplotype_caller_gvcf_ch.combine(gatk_haplotype_caller_ref_genome_ch)
@@ -255,7 +261,7 @@ if (params.mode == "both" || params.mode == "gatk"){
 
             script:
             """
-            gatk --java-options "-Xmx${params.haplotypecaller_max_mem}g" HaplotypeCaller -R $ref_genome -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
+            gatk --java-options "-Xmx${params.haplotypecaller_max_mem}g" --native-pair-hmm-threads ${task.cpus} HaplotypeCaller -R $ref_genome -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
             """
         }
 

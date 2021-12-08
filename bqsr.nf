@@ -53,6 +53,12 @@ gatk_bqsr_bam_publishDir = [params.output_dir, "gatk_bqsr_output_bams"].join(Fil
 gatk_bqsr_vcf_stats_publishDir = [params.output_dir, "gatk_bqsr_vcf_stats"].join(File.separator)
 gatk_bqsr_analyze_covariates_publishDir = [params.output_dir, "gatk_bqsr_analyze_covariates_metrics"].join(File.separator)
 
+if (!params.haplotypecaller_max_mem){
+    params.haplotypecaller_max_mem = 8
+}
+if (!params.gatk_haplotype_caller_cpus){
+    params.gatk_haplotype_caller_cpus = 4
+}
 
 // We will enforce a check to make sure that the output directory doesn't already exist as we don't want to
 // accidentally overwrite the files. We will only do this check if overwrite is false.
@@ -440,7 +446,7 @@ process apply_bqsr_tables{
     tuple val(pair_id), path(merged_bam), path(table), path(ref_genome), path(ref_genome_dict), path(ref_genome_fai) from apply_bqsr_tables_ch.combine(apply_bqsr_tables_ref_genome_ch)
 
     output:
-    tuple val(pair_id), path("${pair_id}.recalibrated*.bam{,.bai}") into apply_bqsr_tables_out_ch,apply_bqsr_tables_round_2_ch
+    tuple val(pair_id), path("${pair_id}*.recalibrated*.bam{,.bai}") into apply_bqsr_tables_out_ch,apply_bqsr_tables_round_2_ch
 
     script:
     out_bam = merged_bam[0].getName().replaceAll(".bam", ".recalibrated.bam")
