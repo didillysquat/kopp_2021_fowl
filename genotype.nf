@@ -261,7 +261,7 @@ if (params.mode == "both" || params.mode == "gatk"){
 
             script:
             """
-            gatk --java-options "-Xmx${params.haplotypecaller_max_mem}g" --native-pair-hmm-threads ${task.cpus} HaplotypeCaller -R $ref_genome -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
+            gatk --java-options "-Xmx${params.haplotypecaller_max_mem}g" HaplotypeCaller --native-pair-hmm-threads ${task.cpus} -R $ref_genome -I ${merged[0]} -O ${pair_id}.merged.g.vcf.gz -ERC GVCF
             """
         }
 
