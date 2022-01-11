@@ -229,7 +229,7 @@ process fastqc_pre_trim{
     file "${out_name}" into ch_fastqc_pre_trim_output
 
     script:
-    out_name = fastq_file.getName().replaceAll('.fastq.gz', '.pre_trim.fastqc.html')
+    out_name = fastq_file.getName().replaceAll('.fastq.gz', '.pre_trim.fastqc.html').replaceAll('.fq.gz', '.pre_trim.fastqc.html')
     """
     fastqc -t 2 -o . $fastq_file
     mv *.html ${out_name}
@@ -253,7 +253,7 @@ process trimmomatic{
     tuple val(pair_id), file("${pair_id}*{1,2}U.fq.gz") into ch_fastqc_post_trim_unpaired,ch_ngm_unpaired
 
 	script:
-	outbase = fastqs[0].getName().replaceAll('.fastq.gz', '.trimmed.fq.gz')
+	outbase = fastqs[0].getName().replaceAll('.fastq.gz', '.trimmed.fq.gz').replaceAll('.fq.gz', '.trimmed.fq.gz')
 	"""
 	trimmomatic PE -threads ${params.trimmomatic_threads} -basein ${fastqs[0]} \\
 		-baseout $outbase \\
@@ -487,6 +487,8 @@ process pcr_bottleneck_coefficient{
     publishDir pcr_bottleneck_coefficient_publishDir, mode: 'copy'
     container 'encodedcc/atac-seq-pipeline:PIP-1469_pbam_b92239a0-82a0-4297-b8b3-3a655a4626a8'
     cpus 1
+    maxRetries 5
+    errorStrategy  { task.attempt <= maxRetries  ? 'retry' : 'ignore' }
 
     input:
     tuple val(pair_id), path(merged) from pcr_bottleneck_coefficient_ch
