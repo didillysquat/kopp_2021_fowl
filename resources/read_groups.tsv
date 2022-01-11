@@ -1,9 +1,9 @@
-file_name       RGID    RGLB    RGPL    RGPU    RGSM
-mpg_L17019-1_W1706_S95_R1_001.fastq.gz  1       lib1    ILLUMINA        unit1   RGID1_S95
-mpg_L17019-1_W1706_S95_R2_001.fastq.gz  1       lib1    ILLUMINA        unit1   RGID1_S95
-mpg_L17020-1_W1707_S96_R1_001.fastq.gz  1       lib1    ILLUMINA        unit1   RGID1_S96
-mpg_L17020-1_W1707_S96_R2_001.fastq.gz  1       lib1    ILLUMINA        unit1   RGID1_S96
-mpg_L17021-1_W1314_S97_R1_001.fastq.gz  1       lib1    ILLUMINA        unit1   RGID1_S97
-mpg_L17021-1_W1314_S97_R2_001.fastq.gz  1       lib1    ILLUMINA        unit1   RGID1_S97
-mpg_L17020-1_W1707_S23_R1_001.fastq.gz  2       lib1    ILLUMINA        unit1   RGID2_S23
-mpg_L17020-1_W1707_S23_R2_001.fastq.gz  2       lib1    ILLUMINA        unit1   RGID2_S23
+file_name_one	file_name_two       RGID    RGLB    RGPL    RGPU    RGSM
+/full/path/to/file/mpg_L17019-1_W1706_S95_R1_001.fastq.gz  /full/path/to/file/mpg_L17019-1_W1706_S95_R1_001.fastq.gz  1       lib1    ILLUMINA        unit1   RGID1_S95
+/full/path/to/file/mpg_L17019-1_W1706_S95_R2_001.fastq.gz  /full/path/to/file/mpg_L17019-1_W1706_S95_R2_001.fastq.gz  1       lib1    ILLUMINA        unit1   RGID1_S95
+/full/path/to/file/mpg_L17020-1_W1707_S96_R1_001.fastq.gz  /full/path/to/file/mpg_L17020-1_W1707_S96_R1_001.fastq.gz  1       lib1    ILLUMINA        unit1   RGID1_S96
+/full/path/to/file/mpg_L17020-1_W1707_S96_R2_001.fastq.gz  /full/path/to/file/mpg_L17020-1_W1707_S96_R2_001.fastq.gz  1       lib1    ILLUMINA        unit1   RGID1_S96
+/full/path/to/file/mpg_L17021-1_W1314_S97_R1_001.fastq.gz  /full/path/to/file/mpg_L17021-1_W1314_S97_R1_001.fastq.gz  1       lib1    ILLUMINA        unit1   RGID1_S97
+/full/path/to/file/mpg_L17021-1_W1314_S97_R2_001.fastq.gz  /full/path/to/file/mpg_L17021-1_W1314_S97_R2_001.fastq.gz  1       lib1    ILLUMINA        unit1   RGID1_S97
+/full/path/to/file/mpg_L17020-1_W1707_S23_R1_001.fastq.gz  /full/path/to/file/mpg_L17020-1_W1707_S23_R1_001.fastq.gz  2       lib1    ILLUMINA        unit1   RGID2_S23
+/full/path/to/file/mpg_L17020-1_W1707_S23_R2_001.fastq.gz  /full/path/to/file/mpg_L17020-1_W1707_S23_R2_001.fastq.gz  2       lib1    ILLUMINA        unit1   RGID2_S23
