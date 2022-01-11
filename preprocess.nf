@@ -105,42 +105,43 @@ make_indices_from_scratch = {
 
 // This method makes read_group_map that is a list of tuples where the first element is the pair_id
 // and the second is the string that is used by AddOrReplaceReadGroups.
+// It also outputs the number of samples and sets up the initial Channel that holds the reads
 
-(read_group_map, num_samples) = {
+(read_group_map, num_samples, reads_ch) = {
     def tup_list = []
     def pair_id_list = []
+    def reads_ch_list = []
     new File(params.input_tsv).eachLine {  
         line ->
         line_comp = line.tokenize();
         // Skip the header line of the .tsv
         if (line_comp[0].endsWith(".gz")){            
-            // TODO check to see that the file exists and return error if it does not
-            def should_exist = new File("${params.input_dir}/${line_comp[0]}")
-            if (!should_exist.exists()){
-                throw new Exception("${should_exist} not found.")
+            // Check to see that the file exists and return error if it does not
+            def should_exist_one = new File(line_comp[0])
+            def should_exist_two = new File(line_comp[1])
+            if (!should_exist_one.exists()){
+                throw new Exception("${should_exist_one} not found.")
+            }
+            if (!should_exist_two.exists()){
+                throw new Exception("${should_exist_two} not found.")
             }
             
-            // regex to get the pair_id
-            def pattern = ~/^(?<pair>.*)_R[1-2].*$/
-            def matcher = line_comp[0] =~ pattern
-            
-            if (matcher){
-                pair_id = matcher.group("pair")
-                if (params.subsample){
+            pair_id = line_comp[6]
+            if (params.subsample){
                     pair_id = "${pair_id}_sub_${params.subsample_depth}"
                 }
-                // At this point we need to see if the mapping information has already been added
-                // If not, then add in the mapping information 
-                if (!pair_id_list.contains(pair_id)){
-                    pair_id_list << pair_id
-                    tup_list << ["${pair_id}".toString(), "RGID=${line_comp[1]} RGLB=${line_comp[2]} RGPL=${line_comp[3]} RGPU=${line_comp[4]} RGSM=${line_comp[5]}"]
-                }                            
+            // At this point we need to see if the mapping information has already been added
+            // If not, then add in the mapping information 
+            if (!pair_id_list.contains(pair_id)){
+                pair_id_list << pair_id
+                tup_list << ["${pair_id}".toString(), "RGID=${line_comp[2]} RGLB=${line_comp[3]} RGPL=${line_comp[4]} RGPU=${line_comp[5]} RGSM=${line_comp[6]}"]
             }else{
-                throw new Exception("An error has occured when making the readgroup dictionary\nNo match was found for ${line_comp[0]}")
+                throw new Exception("There appear to be non-uniue sample names in your input.tsv: ${pair_id}")
             }
+            reads_ch_list << [pair_id, [line_comp[0], line_comp[1]]]
         }
     }
-    return [tup_list, pair_id_list.size]
+    return [tup_list, pair_id_list.size, reads_ch_list]
 }()
 
 // Publish dirs
@@ -180,10 +181,10 @@ files into the trimming and fastqc
 Modify the pair name to indicate subsampled files. This way it will carry through the remainder of the anlysis.
 if not subsample, then create channel directly from the raw sequencing files
 */
-// NB the containerOoptions are required when using the docker profile to prevent permission errors
+// NB the container options are required when using the docker profile to prevent permission errors
 // They are not required when running a singularity profile.
 if (params.subsample){
-    ch_subsample = Channel.fromFilePairs("${params.input_dir}/*R{1,2}*.fastq.gz")    
+    ch_subsample = Channel.fromList(reads_ch)
     process subsample{
         tag "${pair_id}"
         cache 'lenient'
@@ -195,7 +196,7 @@ if (params.subsample){
         cpus 1
 
         input:
-        tuple val(pair_id), file(reads) from ch_subsample
+        tuple val(pair_id), path(reads) from ch_subsample
 
         output:
         tuple val("${pair_id}_sub_${params.subsample_depth}"), file("${pair_id}_sub_${params.subsample_depth}*.fastq.gz") into ch_fastqc_pre_trim,ch_trimmomatic_input
@@ -210,10 +211,10 @@ if (params.subsample){
         """
     }
 }else{
-    Channel.fromFilePairs("${params.input_dir}/*R{1,2}*.fastq.gz").into{ch_fastqc_pre_trim; ch_trimmomatic_input}
+    Channel.fromList(reads_ch).into{ch_fastqc_pre_trim; ch_trimmomatic_input}
 }
 
-// TODO these first three processes should likely be replaced with fastp in future pipelines.
+
 // NB the biocontainers container biocontainers/fastqc:v0.11.9_cv7 does not work on BINAC.
 process fastqc_pre_trim{
     tag "${pair_id}"
@@ -222,7 +223,7 @@ process fastqc_pre_trim{
     cpus 1
 
     input:
-    tuple val(pair_id), file(fastq_file) from ch_fastqc_pre_trim.flatMap{[["${it[0]}_1", it[1][0]], ["${it[0]}_2", it[1][1]]]}
+    tuple val(pair_id), path(fastq_file) from ch_fastqc_pre_trim.flatMap{[["${it[0]}_1", it[1][0]], ["${it[0]}_2", it[1][1]]]}
 
     output:
     file "${out_name}" into ch_fastqc_pre_trim_output
@@ -245,7 +246,7 @@ process trimmomatic{
     cpus params.trimmomatic_threads
 	
 	input:
-	tuple val(pair_id), file(fastqs) from ch_trimmomatic_input
+	tuple val(pair_id), path(fastqs) from ch_trimmomatic_input
 	
 	output:
 	tuple val(pair_id), file("${pair_id}*{1,2}P.fq.gz") into ch_fastqc_post_trim_paired,ch_ngm_paired
@@ -264,7 +265,7 @@ process trimmomatic{
 // NB the biocontainers container biocontainers/fastqc:v0.11.9_cv7 does not work on BINAC.
 // NB running fastqc on the unpaired files is causing fastqc to hang so we will only run
 // on the paired files: https://github.com/s-andrews/FastQC/issues/74
-// As an extra causion we will use the -t 2 option to use two threads wich each get allocated
+// As an extra caution we will use the -t 2 option to use two threads wich each get allocated
 // 250 MB of memory.
 process fastqc_post_trim{
     tag "${pair_id}"
