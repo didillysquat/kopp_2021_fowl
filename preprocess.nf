@@ -323,7 +323,7 @@ if (params.mapping == "ngm"){
         tuple val(pair_id), file(paired), file(unpaired), path(ref_genome), path(ref_genome_indices) from ch_ngm_paired.join(ch_ngm_unpaired).combine(ngm_index_ch)
 
         output:
-        tuple val(pair_id), file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam") into add_read_group_headers_ch
+        tuple val(pair_id), file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam") into merge_paired_unpaired_ch
 
         script:
         """
@@ -391,7 +391,7 @@ if (params.mapping == "ngm"){
         tuple val(pair_id), file(paired), file(unpaired_1), path(unpaired_2) from samtools_sort_ch
 
         output:
-        tuple val(pair_id), file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam") into add_read_group_headers_ch
+        tuple val(pair_id), file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam") into merge_paired_unpaired_ch
 
         script:
         """
@@ -408,10 +408,10 @@ process merge_paired_and_unpaired{
     cpus 1
 
     input:
-    tuple val(pair_id), file(paired), file(unpaired_one), file(unpaired_two) from add_read_group_headers_ch
+    tuple val(pair_id), file(paired), file(unpaired_one), file(unpaired_two) from merge_paired_unpaired_ch
 
     output:
-    tuple val(pair_id), file("${pair_id}.merged.mapped.sam") into read_groups_merged_ch
+    tuple val(pair_id), file("${pair_id}.merged.mapped.sam") into add_read_group_headers_ch
 
     script:
     """
@@ -426,14 +426,14 @@ process add_read_group_headers{
     cpus 1
 
     input:
-    tuple val(pair_id), file(merged), val(read_group_string) from read_groups_merged_ch.join(Channel.fromList(read_group_map))
+    tuple val(pair_id), file(merged), val(read_group_string) from add_read_group_headers_ch.join(Channel.fromList(read_group_map))
 
     output:
-    tuple val(pair_id), file("${pair_id}.merged.mapped.headers.sam") into mark_duplicates_ch
+    tuple val(pair_id), file("${pair_id}.merged.mapped.readGroupHeaders.sam") into mark_duplicates_ch
 
     script:
     """
-    gatk AddOrReplaceReadGroups I=${merged} O=${pair_id}.merged.mapped.headers.sam ${read_group_string}
+    gatk AddOrReplaceReadGroups I=${merged} O=${pair_id}.merged.mapped.readGroupHeaders.sam ${read_group_string}
     """
 }
 
@@ -456,7 +456,7 @@ process markduplicates_spark{
 
     script:
     """
-    gatk MarkDuplicatesSpark --create-output-bam-index --remove-sequencing-duplicates -I ${merged} -O ${pair_id}.merged.deduplicated.sorted.bam -M ${pair_id}.merged.deduplicated.sorted.metrics.txt --conf 'spark.port.maxRetries=${num_samples}'
+    gatk MarkDuplicatesSpark --create-output-bam-index --remove-all-duplicates -I ${merged} -O ${pair_id}.merged.deduplicated.sorted.bam -M ${pair_id}.merged.deduplicated.sorted.metrics.txt --conf 'spark.port.maxRetries=${num_samples}'
     """
 }
 // END OF PRE PROCESSING
