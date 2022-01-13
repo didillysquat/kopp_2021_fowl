@@ -134,7 +134,7 @@ make_indices_from_scratch = {
             // If not, then add in the mapping information 
             if (!pair_id_list.contains(pair_id)){
                 pair_id_list << pair_id
-                tup_list << ["${pair_id}".toString(), "RGID=${line_comp[2]} RGLB=${line_comp[3]} RGPL=${line_comp[4]} RGPU=${line_comp[5]} RGSM=${line_comp[6]}"]
+                tup_list << ["${pair_id}".toString(), "--RGID ${line_comp[2]} --RGLB ${line_comp[3]} --RGPL ${line_comp[4]} --RGPU ${line_comp[5]} --RGSM ${line_comp[6]}"]
             }else{
                 throw new Exception("There appear to be non-uniue sample names in your input.tsv: ${pair_id}")
             }
@@ -323,13 +323,32 @@ if (params.mapping == "ngm"){
         tuple val(pair_id), file(paired), file(unpaired), path(ref_genome), path(ref_genome_indices) from ch_ngm_paired.join(ch_ngm_unpaired).combine(ngm_index_ch)
 
         output:
-        tuple val(pair_id), file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam") into merge_paired_unpaired_ch
+        tuple val(pair_id), file("${pair_id}_P_mapped.unsorted.bam"), file("${pair_id}_U1_mapped.unsorted.bam"), file("${pair_id}_U2_mapped.unsorted.bam") into samtools_sort_ch
 
         script:
         """
-        ngm -t ${task.cpus} -r ${ref_genome} -1 ${paired[0]} -2 ${paired[1]} -o ${pair_id}_P_mapped.sam;
-        ngm -t ${task.cpus} -r ${ref_genome} -q ${unpaired[0]} -o ${pair_id}_U1_mapped.sam;
-        ngm -t ${task.cpus} -r ${ref_genome} -q ${unpaired[1]} -o ${pair_id}_U2_mapped.sam;
+        ngm -b -t ${task.cpus} -r ${ref_genome} -1 ${paired[0]} -2 ${paired[1]} -o ${pair_id}_P_mapped.unsorted.bam;
+        ngm -b -t ${task.cpus} -r ${ref_genome} -q ${unpaired[0]} -o ${pair_id}_U1_mapped.unsorted.bam;
+        ngm -b -t ${task.cpus} -r ${ref_genome} -q ${unpaired[1]} -o ${pair_id}_U2_mapped.unsorted.bam;
+        """
+    }
+   
+    process samtools_sort{
+        tag "${pair_id}"
+        container 'singlecellpipeline/samtools:v0.0.3'
+        cpus params.mapping_threads
+
+        input:
+        tuple val(pair_id), file(paired), file(unpaired_1), path(unpaired_2) from samtools_sort_ch
+
+        output:
+        tuple val(pair_id), file("${pair_id}_P_mapped.bam"), file("${pair_id}_U1_mapped.bam"), file("${pair_id}_U2_mapped.bam") into merge_paired_unpaired_ch
+
+        script:
+        """
+        samtools sort --threads ${task.cpus - 1} ${paired} --output-fmt BAM > ${pair_id}_P_mapped.bam;
+        samtools sort --threads ${task.cpus - 1} ${unpaired_1} --output-fmt BAM > ${pair_id}_U1_mapped.bam;
+        samtools sort --threads ${task.cpus - 1} ${unpaired_2} --output-fmt BAM > ${pair_id}_U2_mapped.bam;
         """
     }
 }else{
@@ -359,9 +378,9 @@ if (params.mapping == "ngm"){
         ngm_index_ch = Channel.fromList([[file(params.ref), file("${params.ref}{.sa,.amb,.ann,.pac,.bwt}")]])
     }
 
-    process bwa_mapping{
+    process bwa_mapping_sort{
         tag "${pair_id}"
-        container 'biocontainers/bwa:v0.7.17_cv1'
+        container 'dukegcb/bwa-samtools:latest'
         if (workflow.containerEngine == 'docker'){
             containerOptions '-u $(id -u):$(id -g)'
         }
@@ -371,69 +390,50 @@ if (params.mapping == "ngm"){
         tuple val(pair_id), file(paired), file(unpaired), path(ref_genome), path(ref_genome_indices) from ch_ngm_paired.join(ch_ngm_unpaired).combine(ngm_index_ch)
 
         output:
-        tuple val(pair_id), file("${pair_id}_P_mapped.unsorted.sam"), file("${pair_id}_U1_mapped.unsorted.sam"), file("${pair_id}_U2_mapped.unsorted.sam") into samtools_sort_ch
+        tuple val(pair_id), file("${pair_id}_P_mapped.bam"), file("${pair_id}_U1_mapped.bam"), file("${pair_id}_U2_mapped.bam") into merge_paired_unpaired_ch
 
         script:
         """
-        bwa mem -t ${task.cpus} ${ref_genome} ${paired[0]} ${paired[1]} > ${pair_id}_P_mapped.unsorted.sam;
-        bwa mem -t ${task.cpus} ${ref_genome} ${unpaired[0]} > ${pair_id}_U1_mapped.unsorted.sam;
-        bwa mem -t ${task.cpus} ${ref_genome} ${unpaired[1]} > ${pair_id}_U2_mapped.unsorted.sam;
+        bwa mem -t ${task.cpus} ${ref_genome} ${paired[0]} ${paired[1]} | samtools sort -@${task.cpus} -o ${pair_id}_P_mapped.bam -
+        bwa mem -t ${task.cpus} ${ref_genome} ${unpaired[0]} | samtools sort -@${task.cpus} -o ${pair_id}_U1_mapped.bam -
+        bwa mem -t ${task.cpus} ${ref_genome} ${unpaired[1]} | samtools sort -@${task.cpus} -o ${pair_id}_U2_mapped.bam -
         """
     }
     
-    // --threads is the number of additional threads to use (hence the -1)
-    process samtools_sort{
-        tag "${pair_id}"
-        container 'singlecellpipeline/samtools:v0.0.3'
-        cpus params.mapping_threads
-
-        input:
-        tuple val(pair_id), file(paired), file(unpaired_1), path(unpaired_2) from samtools_sort_ch
-
-        output:
-        tuple val(pair_id), file("${pair_id}_P_mapped.sam"), file("${pair_id}_U1_mapped.sam"), file("${pair_id}_U2_mapped.sam") into merge_paired_unpaired_ch
-
-        script:
-        """
-        samtools sort --threads ${task.cpus - 1} ${paired} --output-fmt SAM > ${pair_id}_P_mapped.sam;
-        samtools sort --threads ${task.cpus - 1} ${unpaired_1} --output-fmt SAM > ${pair_id}_U1_mapped.sam;
-        samtools sort --threads ${task.cpus - 1} ${unpaired_2} --output-fmt SAM > ${pair_id}_U2_mapped.sam;
-        """
-    }
 }
 
 process merge_paired_and_unpaired{
     tag "${pair_id}"
-    container 'broadinstitute/gatk:4.2.0.0'
+    container 'broadinstitute/gatk:4.2.4.1'
     cpus 1
 
     input:
     tuple val(pair_id), file(paired), file(unpaired_one), file(unpaired_two) from merge_paired_unpaired_ch
 
     output:
-    tuple val(pair_id), file("${pair_id}.merged.mapped.sam") into add_read_group_headers_ch
+    tuple val(pair_id), file("${pair_id}.merged.mapped.bam"), file("${pair_id}.merged.mapped*.bai") into add_read_group_headers_ch
 
     script:
     """
-    gatk MergeSamFiles --INPUT $paired --INPUT $unpaired_one --INPUT $unpaired_two --OUTPUT ${pair_id}.merged.mapped.sam
+    gatk MergeSamFiles --CREATE_INDEX --INPUT $paired --INPUT $unpaired_one --INPUT $unpaired_two --OUTPUT ${pair_id}.merged.mapped.bam
     """
 
 }
 
 process add_read_group_headers{
     tag "${pair_id}"
-    container 'broadinstitute/gatk:4.2.0.0'
+    container 'broadinstitute/gatk:4.2.4.1'
     cpus 1
 
     input:
-    tuple val(pair_id), file(merged), val(read_group_string) from add_read_group_headers_ch.join(Channel.fromList(read_group_map))
+    tuple val(pair_id), file(merged), file(merged_bai), val(read_group_string) from add_read_group_headers_ch.join(Channel.fromList(read_group_map))
 
     output:
-    tuple val(pair_id), file("${pair_id}.merged.mapped.readGroupHeaders.sam") into mark_duplicates_ch
+    tuple val(pair_id), file("${pair_id}.merged.mapped.readGroupHeaders.bam"), file("${pair_id}.merged.mapped.readGroupHeaders*.bai") into mark_duplicates_ch
 
     script:
     """
-    gatk AddOrReplaceReadGroups I=${merged} O=${pair_id}.merged.mapped.readGroupHeaders.sam ${read_group_string}
+    gatk AddOrReplaceReadGroups --CREATE_INDEX true --INPUT ${merged} --OUTPUT ${pair_id}.merged.mapped.readGroupHeaders.bam ${read_group_string}
     """
 }
 
@@ -442,13 +442,13 @@ process add_read_group_headers{
 // This does not appear to be an issue when running a docker profile.
 process markduplicates_spark{
     tag "${pair_id}"
-    container 'broadinstitute/gatk:4.2.0.0'
+    container 'broadinstitute/gatk:4.2.4.1'
     publishDir markduplicates_metrics_publishDir, pattern: "*.metrics.txt", mode: 'copy'
     publishDir output_bam_publishDir, pattern: "*.bam{,.bai}", mode: 'copy'
     cpus 4
 
     input:
-    tuple val(pair_id), file(merged) from mark_duplicates_ch
+    tuple val(pair_id), file(merged), file(merged_bai) from mark_duplicates_ch
 
     output:
     tuple val(pair_id), file("${pair_id}.merged.deduplicated.sorted.bam{,.bai}") into collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mosdepth_sequencing_coverage_ch,samtools_depth_stats_ch,samtools_mapping_stats_ch,perprocess_overview_bams_ch
@@ -456,7 +456,7 @@ process markduplicates_spark{
 
     script:
     """
-    gatk MarkDuplicatesSpark --create-output-bam-index --remove-all-duplicates -I ${merged} -O ${pair_id}.merged.deduplicated.sorted.bam -M ${pair_id}.merged.deduplicated.sorted.metrics.txt --conf 'spark.port.maxRetries=${num_samples}'
+    gatk MarkDuplicatesSpark --create-output-bam-index true --remove-all-duplicates -I ${merged} -O ${pair_id}.merged.deduplicated.sorted.bam -M ${pair_id}.merged.deduplicated.sorted.metrics.txt --conf 'spark.port.maxRetries=${num_samples}' --spark-master local[${task.cpus}]
     """
 }
 // END OF PRE PROCESSING
@@ -465,7 +465,7 @@ process markduplicates_spark{
 process collect_gc_bias_metrics{
     tag "${pair_id}"
     publishDir collect_gc_bias_metrics_publishDir, mode: 'copy'
-    container 'broadinstitute/gatk:4.2.0.0'
+    container 'broadinstitute/gatk:4.2.4.1'
     cpus 1
 
     input:
