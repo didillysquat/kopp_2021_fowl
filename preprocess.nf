@@ -49,6 +49,9 @@ if (!params.trimmomatic_threads){
 if (!params.mapping_threads){
     params.mapping_threads = 1
 }
+if (!params.mark_duplicate_threads){
+    params.mark_duplicate_threads = 1
+}
 
 params.remake_indices = false;
 
@@ -221,6 +224,7 @@ process fastqc_pre_trim{
     container 'singlecellpipeline/fastqc:v0.0.2'
     publishDir fastqc_pre_trim_publish_dir, mode: 'copy'
     cpus 1
+    cache 'lenient'
 
     input:
     tuple val(pair_id), path(fastq_file) from ch_fastqc_pre_trim.flatMap{[["${it[0]}_1", it[1][0]], ["${it[0]}_2", it[1][1]]]}
@@ -272,6 +276,7 @@ process fastqc_post_trim{
     container 'singlecellpipeline/fastqc:v0.0.2'
     publishDir fastqc_post_trim_publish_dir, mode: 'copy'
     cpus 1
+    cache 'lenient'
 
     input:
     tuple val(pair_id), file(paired_files), file(unpaired_files) from ch_fastqc_post_trim_paired.join(ch_fastqc_post_trim_unpaired)
@@ -415,7 +420,7 @@ process merge_paired_and_unpaired{
 
     script:
     """
-    gatk MergeSamFiles --CREATE_INDEX --INPUT $paired --INPUT $unpaired_one --INPUT $unpaired_two --OUTPUT ${pair_id}.merged.mapped.bam
+    gatk --java-options "-XX:ParallelGCThreads=1 -XX:ConcGCThreads=1" MergeSamFiles --CREATE_INDEX --INPUT $paired --INPUT $unpaired_one --INPUT $unpaired_two --OUTPUT ${pair_id}.merged.mapped.bam
     """
 
 }
@@ -433,7 +438,7 @@ process add_read_group_headers{
 
     script:
     """
-    gatk AddOrReplaceReadGroups --CREATE_INDEX true --INPUT ${merged} --OUTPUT ${pair_id}.merged.mapped.readGroupHeaders.bam ${read_group_string}
+    gatk --java-options "-XX:ParallelGCThreads=1 -XX:ConcGCThreads=1" AddOrReplaceReadGroups --CREATE_INDEX true --INPUT ${merged} --OUTPUT ${pair_id}.merged.mapped.readGroupHeaders.bam ${read_group_string}
     """
 }
 
@@ -445,7 +450,7 @@ process markduplicates_spark{
     container 'broadinstitute/gatk:4.2.4.1'
     publishDir markduplicates_metrics_publishDir, pattern: "*.metrics.txt", mode: 'copy'
     publishDir output_bam_publishDir, pattern: "*.bam{,.bai}", mode: 'copy'
-    cpus 4
+    cpus params.mark_duplicate_threads
 
     input:
     tuple val(pair_id), file(merged), file(merged_bai) from mark_duplicates_ch
@@ -456,7 +461,7 @@ process markduplicates_spark{
 
     script:
     """
-    gatk MarkDuplicatesSpark --create-output-bam-index true --remove-all-duplicates -I ${merged} -O ${pair_id}.merged.deduplicated.sorted.bam -M ${pair_id}.merged.deduplicated.sorted.metrics.txt --conf 'spark.port.maxRetries=${num_samples}' --spark-master local[${task.cpus}]
+    gatk MarkDuplicatesSpark --java-options "-XX:ParallelGCThreads=1 -XX:ConcGCThreads=1" --create-output-bam-index true --remove-all-duplicates -I ${merged} -O ${pair_id}.merged.deduplicated.sorted.bam -M ${pair_id}.merged.deduplicated.sorted.metrics.txt --conf 'spark.port.maxRetries=${num_samples}' --spark-master local[${task.cpus}]
     """
 }
 // END OF PRE PROCESSING
