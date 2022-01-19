@@ -9,6 +9,7 @@ import sys
 import pandas as pd
 import os
 import re
+import ntpath
 
 class PreProcSummary:
     def __init__(self):
@@ -20,29 +21,28 @@ class PreProcSummary:
             "RGSM", "RGID",	"RGLB",	"RGPL",	"RGPU", "filename_one", "filename_two",
             "reads_pre_trim_one", "reads_pre_trim_two", "reads_pre_trim_total", "reads_post_trim_one",
             "reads_post_trim_two", "reads_post_trim_total", "reads_trimmed_lost_one", "reads_trimmed_lost_two", "reads_trimmed_lost_total",
-            "reads_trimmed_lost_total_percent", "reads_mapped", "reads_mapped_and_paired", "reads_unmapped",
-            "reads_mapped_percent", "average_coverage", "average_coverage_stdev", "unpaired_reads_examined_for_deduplication",
-            "paired_reads_examined_for_deduplication", "unpaired_read_duplicated", "paired_read_duplicates", "percent_duplication",
-            "sequenced_library_complexity", "estimated_library_complexity", "percent_library_sequenced"
+            "reads_trimmed_lost_total_proportion", "reads_mapped", "reads_mapped_and_paired", "reads_unmapped",
+            "reads_mapped_proportion", "average_coverage", "average_coverage_stdev", "unpaired_reads_examined_for_deduplication",
+            "paired_reads_examined_for_deduplication", "unpaired_read_duplicated", "paired_read_duplicates", "proportion_duplication",
+            "sequenced_library_complexity", "estimated_library_complexity", "proportion_library_sequenced"
             ]
 
         self.meta_info_df = pd.read_csv(self.tsv_path, sep="\t")
-        self.meta_info_df.set_index("file_name", inplace=True)
+        self.meta_info_df.set_index("RGSM", inplace=True, drop=False)
 
         # Make dict that is sample name to read_one read_two
         # Meta dict
         meta_info_dict = {}
-        for file_name, ser in self.meta_info_df.iterrows():
-            if "R1" in file_name:
-                meta_info_dict[ser.RGSM] = [
-                        ser["RGSM"], ser["RGID"], ser["RGLB"], ser["RGPL"], ser["RGPU"], file_name, file_name.replace("_R1_", "_R2_"),
-                        0,0,0,0,
-                        0,0,0,0,0,
-                        0.0,0,0,0,
-                        0.0,0.0,0.0,0,
-                        0,0,0,0.0,
-                        0,0,0.0
-                    ]
+        for sample_name, ser in self.meta_info_df.iterrows():
+            meta_info_dict[ser.RGSM] = [
+                    ser["RGSM"], ser["RGID"], ser["RGLB"], ser["RGPL"], ser["RGPU"], ntpath.basename(ser["file_name_one"]), ntpath.basename(ser["file_name_two"]),
+                    0,0,0,0,
+                    0,0,0,0,0,
+                    0.0,0,0,0,
+                    0.0,0.0,0.0,0,
+                    0,0,0,0.0,
+                    0,0,0.0
+                ]
 
         self.summary_df = pd.DataFrame.from_dict(orient="index", columns=self.columns, data=meta_info_dict)
 
@@ -92,7 +92,7 @@ class PreProcSummary:
             self.summary_df.at[sample, "reads_trimmed_lost_one"] = self.summary_df.at[sample, "reads_pre_trim_one"] - self.summary_df.at[sample, "reads_post_trim_one"]
             self.summary_df.at[sample, "reads_trimmed_lost_two"] = self.summary_df.at[sample, "reads_pre_trim_two"] - self.summary_df.at[sample, "reads_post_trim_two"]
             self.summary_df.at[sample, "reads_trimmed_lost_total"] = self.summary_df.at[sample, "reads_pre_trim_total"] - self.summary_df.at[sample, "reads_post_trim_total"]
-            self.summary_df.at[sample, "reads_trimmed_lost_total_percent"] = self.summary_df.at[sample, "reads_trimmed_lost_total"] / self.summary_df.at[sample, "reads_pre_trim_total"]
+            self.summary_df.at[sample, "reads_trimmed_lost_total_proportion"] = self.summary_df.at[sample, "reads_trimmed_lost_total"] / self.summary_df.at[sample, "reads_pre_trim_total"]
         print("\n")
 
         print("Collecting mapping stats")
@@ -119,7 +119,7 @@ class PreProcSummary:
             self.summary_df.at[sample, "reads_mapped"] = reads_mapped
             self.summary_df.at[sample, "reads_mapped_and_paired"] = reads_mapped_and_paired
             self.summary_df.at[sample, "reads_unmapped"] = reads_unmapped
-            self.summary_df.at[sample, "reads_mapped_percent"] = 1 - (reads_unmapped/reads_mapped)
+            self.summary_df.at[sample, "reads_mapped_proportion"] = 1 - (reads_unmapped/reads_mapped)
         print("\n")
 
         print("Collecting coverage stats")
@@ -157,7 +157,7 @@ class PreProcSummary:
                     paired_reads_examined_for_deduplication = int(components[2])
                     unpaired_read_duplicated = int(components[5])
                     paired_read_duplicates = int(components[6])
-                    percent_duplication = float(components[8])
+                    proportion_duplication = float(components[8])
                     sequenced_library_complexity = int(components[9])
                     break
 
@@ -165,11 +165,11 @@ class PreProcSummary:
             self.summary_df.at[sample, "paired_reads_examined_for_deduplication"] = paired_reads_examined_for_deduplication
             self.summary_df.at[sample, "unpaired_read_duplicated"] = unpaired_read_duplicated
             self.summary_df.at[sample, "paired_read_duplicates"] = paired_read_duplicates
-            self.summary_df.at[sample, "percent_duplication"] = percent_duplication
+            self.summary_df.at[sample, "proportion_duplication"] = proportion_duplication
 
-            self.summary_df.at[sample, "sequenced_library_complexity"] = (self.summary_df.at[sample, "reads_mapped"] + self.summary_df.at[sample, "reads_unmapped"]) - ((self.summary_df.at[sample, "reads_mapped"] + self.summary_df.at[sample, "reads_unmapped"]) * percent_duplication)
+            self.summary_df.at[sample, "sequenced_library_complexity"] = (self.summary_df.at[sample, "reads_mapped"] + self.summary_df.at[sample, "reads_unmapped"]) - ((self.summary_df.at[sample, "reads_mapped"] + self.summary_df.at[sample, "reads_unmapped"]) * proportion_duplication)
             self.summary_df.at[sample, "estimated_library_complexity"] = sequenced_library_complexity
-            self.summary_df.at[sample, "percent_library_sequenced"] = self.summary_df.at[sample, "sequenced_library_complexity"] / self.summary_df.at[sample, "estimated_library_complexity"]
+            self.summary_df.at[sample, "proportion_library_sequenced"] = self.summary_df.at[sample, "sequenced_library_complexity"] / self.summary_df.at[sample, "estimated_library_complexity"]
         print("\n")
 
         self.summary_df.to_csv(os.path.join(self.cwd, "preprocessing_overview.tsv"), sep="\t", index=False)
