@@ -434,11 +434,28 @@ process add_read_group_headers{
     tuple val(pair_id), file(merged), file(merged_bai), val(read_group_string) from add_read_group_headers_ch.join(Channel.fromList(read_group_map))
 
     output:
-    tuple val(pair_id), file("${pair_id}.merged.mapped.readGroupHeaders.bam"), file("${pair_id}.merged.mapped.readGroupHeaders*.bai") into mark_duplicates_ch
+    tuple val(pair_id), file("${pair_id}.merged.mapped.readGroupHeaders.bam"), file("${pair_id}.merged.mapped.readGroupHeaders*.bai") into mark_duplicates_ch, mapping_stats_pre_dup_ch
 
     script:
     """
     gatk --java-options "-XX:ParallelGCThreads=1 -XX:ConcGCThreads=1" AddOrReplaceReadGroups --CREATE_INDEX true --INPUT ${merged} --OUTPUT ${pair_id}.merged.mapped.readGroupHeaders.bam ${read_group_string}
+    """
+}
+
+process samtools_mapping_stats_pre_deduplication{
+    tag "${sample}"
+    publishDir samtools_mapping_stats_publishDir, mode: "copy"
+    container 'singlecellpipeline/samtools:v0.0.3'
+
+    input:
+    tuple val(sample), path(bam), path(bai) from mapping_stats_pre_dup_ch
+
+    output:
+    path "${sample}.bam.prededup.stats.txt" into samtools_stats_pre_dedup_out
+
+    script:
+    """
+    samtools stats $bam > ${sample}.bam.prededup.stats.txt
     """
 }
 
@@ -555,7 +572,7 @@ process mosdepth_plot_seq_coverage{
     """
 }
 
-process samtools_mapping_stats{
+process samtools_mapping_stats_post_deduplication{
     tag "${sample}"
     publishDir samtools_mapping_stats_publishDir, mode: "copy"
     container 'singlecellpipeline/samtools:v0.0.3'
@@ -564,11 +581,11 @@ process samtools_mapping_stats{
     tuple val(sample), path(bam) from samtools_mapping_stats_ch
 
     output:
-    path "${sample}.bam.stats.txt" into samtools_stats_out
+    path "${sample}.bam.postdedup.stats.txt" into samtools_stats_out
 
     script:
     """
-    samtools stats ${bam[0]} > ${sample}.bam.stats.txt
+    samtools stats ${bam[0]} > ${sample}.bam.postdedup.stats.txt
     """
 }
 
@@ -599,8 +616,9 @@ process preprocess_summary{
     path posttrim from ch_fastqc_post_trim_output.collect()
     path bams from perprocess_overview_bams_ch.collect{it[1]}
     path depth from samtools_depth_out.collect()
-    path mapping from samtools_stats_out.collect()
+    path postdedup_stats from samtools_stats_out.collect()
     path duplication_metric from mark_duplicate_metrics_ch.collect()
+    path prededup_stats from samtools_stats_pre_dedup_out.collect()
     path input_tsv
     
     output:
