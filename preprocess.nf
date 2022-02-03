@@ -53,6 +53,10 @@ if (!params.mark_duplicate_threads){
     params.mark_duplicate_threads = 1
 }
 
+if (!params.estlibcomp_max_mem){
+    params.estlibcomp_max_mem = 8
+}
+
 params.remake_indices = false;
 
 if (!params.subsample){
@@ -438,7 +442,7 @@ process add_read_group_headers{
     tuple val(pair_id), file(merged), file(merged_bai), val(read_group_string) from add_read_group_headers_ch.join(Channel.fromList(read_group_map))
 
     output:
-    tuple val(pair_id), file("${pair_id}.merged.mapped.readGroupHeaders.bam"), file("${pair_id}.merged.mapped.readGroupHeaders*.bai") into mark_duplicates_ch, mapping_stats_prededup_ch
+    tuple val(pair_id), file("${pair_id}.merged.mapped.readGroupHeaders.bam"), file("${pair_id}.merged.mapped.readGroupHeaders*.bai") into mark_duplicates_ch, mapping_stats_prededup_ch, estimate_library_complexity_ch
 
     script:
     """
@@ -499,14 +503,14 @@ process estimate_library_complexity{
     publishDir estimatelibrarycomplexity_metrics_publishDir, pattern: "*.metrics.txt", mode: 'copy'
 
     input:
-    tuple val(pair_id), file(merged), file(merged_bai) from mark_duplicates_ch
+    tuple val(pair_id), file(merged), file(merged_bai) from estimate_library_complexity_ch
 
     output:
     file("${pair_id}.estlibcomp.txt") into est_lib_comp_metrics_ch
 
     script:
     """
-    gatk EstimateLibraryComplexity --java-options "-XX:ParallelGCThreads=1 -XX:ConcGCThreads=1" -I ${merged} -O ${pair_id}.estlibcomp.txt
+    gatk EstimateLibraryComplexity --java-options "-Xmx${params.estlibcomp_max_mem}g -XX:ParallelGCThreads=1 -XX:ConcGCThreads=1" -I ${merged} -O ${pair_id}.estlibcomp.txt
     """
 }
 
