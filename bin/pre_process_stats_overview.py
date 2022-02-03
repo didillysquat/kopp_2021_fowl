@@ -20,17 +20,19 @@ class PreProcSummary:
         self.columns = [
             "RGSM", "RGID",	"RGLB",	"RGPL",	"RGPU", "filename_one", "filename_two",
             # Pre adapter trim stats
-            "reads_pre_trim_one", "reads_pre_trim_two", "reads_pre_trim_total", "reads_post_trim_one",
+            "reads_pre_trim_one", "reads_pre_trim_two", "reads_pre_trim_total",
             # Post adapter trim stats
-            "reads_post_trim_two", "reads_post_trim_total", "reads_trimmed_lost_one", "reads_trimmed_lost_two", "reads_trimmed_lost_total", "reads_trimmed_lost_total_proportion",
+            "reads_post_trim_one", "reads_post_trim_two", "reads_post_trim_total",
+            # Reads lost
+            "reads_trimmed_lost_one", "reads_trimmed_lost_two", "reads_trimmed_lost_total", "reads_trimmed_lost_total_proportion",
             # Pre deduplication bam stats
             "raw_total_sequences_pre_deduplication",	"reads_mapped_pre_deduplication",	"reads_mapped_and_paired_pre_deduplication",	"reads_unmapped_pre_deduplication",	"reads_mapped_proportion_pre_deduplication",
             # Deduplication MarkDuplicatesSpark
-            "unread_pairs_examined_for_deduplication_markduplicatesspark", "read_pairs_examined_for_deduplication_markduplicatesspark", "unpaired_read_duplicated_markduplicatesspark",
-            "read_pair_duplicates_markduplicatesspark", "proportion_duplication_markduplicatesspark", "estimated_library_complexity_markduplicatesspark", "proportion_library_sequenced_markduplicatesspark",
+            "unpaired_reads_examined_for_deduplication_MarkDuplicatesSpark", "read_pairs_examined_for_deduplication_MarkDuplicatesSpark", "unpaired_read_duplicated_MarkDuplicatesSpark",
+            "read_pair_duplicates_MarkDuplicatesSpark", "proportion_duplication_MarkDuplicatesSpark", "estimated_library_complexity_MarkDuplicatesSpark", "proportion_library_sequenced_MarkDuplicatesSpark",
             # Deduplication EstimateLibraryComplexity
-            "read_pairs_examined_estimatelibrarycomplexity", "read_pair_duplicates_estimate_library_complexity", "proportion_duplication_estimatelibrarycomplexity",
-            "estimated_library_complexity_estimatelibrarycomplexity", "proportion_library_sequenced_estimatelibrarycomplexity",
+            "read_pairs_examined_EstimateLibraryComplexity", "read_pair_duplicates_EstimateLibraryComplexity", "proportion_duplication_EstimateLibraryComplexity",
+            "estimated_library_complexity_EstimateLibraryComplexity", "proportion_library_sequenced_EstimateLibraryComplexity",
             # Post deduplication bam stats
             "raw_total_sequences_post_deduplication", "reads_mapped_post_deduplication", "reads_mapped_and_paired_post_deduplication", "reads_unmapped_post_deduplication", "reads_mapped_proportion_post_deduplication",
             # Coverage stats
@@ -46,27 +48,43 @@ class PreProcSummary:
         for sample_name, ser in self.meta_info_df.iterrows():
             meta_info_dict[ser.RGSM] = [
                     ser["RGSM"], ser["RGID"], ser["RGLB"], ser["RGPL"], ser["RGPU"], ntpath.basename(ser["file_name_one"]), ntpath.basename(ser["file_name_two"]),
-                    0,0,0,0,
-                    0,0,0,0,0,
-                    0.0,0,0,0,
-                    0.0,0.0,0.0,0,
+                    # Pre adapter trim stats
+                    0,0,0,
+                    # Post adapter trim stats
+                    0,0,0,
+                    # Reads lost
                     0,0,0,0.0,
-                    0,0,0.0
+                    # Pre deduplication bam stats
+                    0,0,0,0,0.0,
+                    # Deduplication MarkDuplicatesSpark
+                    0,0,0,
+                    0,0.0,0,0.0,
+                    # Deduplication EstimateLibraryComplexity
+                    0,0,0.0,
+                    0,0.0,
+                    # Post deduplication bam stats
+                    0,0,0,0,0.0,
+                    # Coverage stats
+                    0.0,0.0
                 ]
 
         self.summary_df = pd.DataFrame.from_dict(orient="index", columns=self.columns, data=meta_info_dict)
 
     def populate_summary_dict(self):
-      
-        self._post_trim_seq_counts(self)
+    
+        self._pre_trim()
 
-        self._mapping_stats_pre_deduplication(self)
+        self._post_trim_seq_counts()
 
-        self._markduplicatesspark_complexity(self)
+        self._mapping_stats_pre_deduplication()
+
+        self._markduplicatesspark_complexity()
         
-        self._estimatelibrarycomplexity_complexity(self)
+        self._estimatelibrarycomplexity_complexity()
         
-        self._mapping_stats_post_deduplication(self)      
+        self._mapping_stats_post_deduplication()     
+
+        self._coverage_stats()
 
         self.summary_df.to_csv(os.path.join(self.cwd, "preprocessing_overview.tsv"), sep="\t", index=False)
 
@@ -112,7 +130,7 @@ class PreProcSummary:
         print("Collecting mapping stats post deduplication")
         post_dedup_mapping_stats_file_list = [_ for _ in os.listdir(self.cwd) if _.endswith("bam.postdedup.stats.txt")]
         for sample in self.summary_df.index:
-            raw_total_sequences, reads_mapped,  reads_mapped_and_paired, reads_unmapped = self._extract_bam_stats(self, sample=sample, file_list=post_dedup_mapping_stats_file_list)
+            raw_total_sequences, reads_mapped,  reads_mapped_and_paired, reads_unmapped = self._extract_bam_stats(sample=sample, file_list=post_dedup_mapping_stats_file_list)
             self.summary_df.at[sample, "raw_total_sequences_post_deduplication"] = raw_total_sequences
             self.summary_df.at[sample, "reads_mapped_post_deduplication"] = reads_mapped
             self.summary_df.at[sample, "reads_mapped_and_paired_post_deduplication"] = reads_mapped_and_paired
@@ -138,15 +156,15 @@ class PreProcSummary:
                     ESTIMATED_LIBRARY_SIZE = int(components[9])
                     break
 
-            self.summary_df.at[sample, "read_pairs_examined_estimatelibrarycomplexity"] = READ_PAIRS_EXAMINED
-            self.summary_df.at[sample, "read_pair_duplicates_estimate_library_complexity"] = READ_PAIR_DUPLICATES
-            self.summary_df.at[sample, "proportion_duplication_estimatelibrarycomplexity"] = PERCENT_DUPLICATION
+            self.summary_df.at[sample, "read_pairs_examined_EstimateLibraryComplexity"] = READ_PAIRS_EXAMINED
+            self.summary_df.at[sample, "read_pair_duplicates_EstimateLibraryComplexity"] = READ_PAIR_DUPLICATES
+            self.summary_df.at[sample, "proportion_duplication_EstimateLibraryComplexity"] = PERCENT_DUPLICATION
 
             # NB the complexity estimates are calculated using the MarkDuplicates from GATK and so are based only on the mapped reads (paired and unpaired)
             # As such, the sequenced_library_complexity is the reads_mapped statistic from the samtools stats output that was run on the deduplicated
             # bam file.
-            self.summary_df.at[sample, "estimated_library_complexity_estimatelibrarycomplexity"] = ESTIMATED_LIBRARY_SIZE
-            self.summary_df.at[sample, "proportion_library_sequenced_estimatelibrarycomplexity"] = (READ_PAIRS_EXAMINED - READ_PAIR_DUPLICATES) / ESTIMATED_LIBRARY_SIZE
+            self.summary_df.at[sample, "estimated_library_complexity_EstimateLibraryComplexity"] = ESTIMATED_LIBRARY_SIZE
+            self.summary_df.at[sample, "proportion_library_sequenced_EstimateLibraryComplexity"] = (READ_PAIRS_EXAMINED - READ_PAIR_DUPLICATES) / ESTIMATED_LIBRARY_SIZE
         print("\n")
 
     def _markduplicatesspark_complexity(self):
@@ -169,27 +187,27 @@ class PreProcSummary:
                     estimated_library_complexity = int(components[9])
                     break
             
-            self.summary_df.at[sample, "unread_pairs_examined_for_deduplication_markduplicatesspark"] = unpaired_reads_examined_for_deduplication
-            self.summary_df.at[sample, "read_pairs_examined_for_deduplication_markduplicatesspark"] = read_pairs_examined_for_deduplication
-            self.summary_df.at[sample, "unpaired_read_duplicated_markduplicatesspark"] = unpaired_read_duplicated
-            self.summary_df.at[sample, "read_pair_duplicates_markduplicatesspark"] = paired_read_duplicates
-            self.summary_df.at[sample, "proportion_duplication_markduplicatesspark"] = proportion_duplication
+            self.summary_df.at[sample, "unpaired_reads_examined_for_deduplication_MarkDuplicatesSpark"] = unpaired_reads_examined_for_deduplication
+            self.summary_df.at[sample, "read_pairs_examined_for_deduplication_MarkDuplicatesSpark"] = read_pairs_examined_for_deduplication
+            self.summary_df.at[sample, "unpaired_read_duplicated_MarkDuplicatesSpark"] = unpaired_read_duplicated
+            self.summary_df.at[sample, "read_pair_duplicates_MarkDuplicatesSpark"] = paired_read_duplicates
+            self.summary_df.at[sample, "proportion_duplication_MarkDuplicatesSpark"] = proportion_duplication
 
             # NB the complexity estimates are calculated using the MarkDuplicates from GATK and so are based only on the mapped reads (paired and unpaired)
             # As such, the sequenced_library_complexity is the reads_mapped statistic from the samtools stats output that was run on the deduplicated
             # bam file.
-            self.summary_df.at[sample, "estimated_library_complexity_markduplicatesspark"] = estimated_library_complexity
+            self.summary_df.at[sample, "estimated_library_complexity_MarkDuplicatesSpark"] = estimated_library_complexity
             # Because the sequence complexity estimate is the number of sequences (not reads!; i.e. a sequence needs two reads)
             # we will calculate the proportion of library seuquenced based on the number of unique read pairs
             sequenced_complexity = (read_pairs_examined_for_deduplication - paired_read_duplicates)
-            self.summary_df.at[sample, "proportion_library_sequenced_markduplicatesspark"] = sequenced_complexity / estimated_library_complexity
+            self.summary_df.at[sample, "proportion_library_sequenced_MarkDuplicatesSpark"] = sequenced_complexity / estimated_library_complexity
         print("\n")
 
     def _mapping_stats_pre_deduplication(self):
         print("Collecting mapping stats pre deduplication")
         pre_dedup_mapping_stats_file_list = [_ for _ in os.listdir(self.cwd) if _.endswith("bam.prededup.stats.txt")]
         for sample in self.summary_df.index:
-            raw_total_sequences, reads_mapped,  reads_mapped_and_paired, reads_unmapped = self._extract_bam_stats(self, sample=sample, file_list=pre_dedup_mapping_stats_file_list)
+            raw_total_sequences, reads_mapped,  reads_mapped_and_paired, reads_unmapped = self._extract_bam_stats(sample=sample, file_list=pre_dedup_mapping_stats_file_list)
 
             self.summary_df.at[sample, "raw_total_sequences_pre_deduplication"] = raw_total_sequences
             self.summary_df.at[sample, "reads_mapped_pre_deduplication"] = reads_mapped
