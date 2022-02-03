@@ -19,12 +19,22 @@ class PreProcSummary:
         # These are the headers/metrics that we will pull out of the output files from the above directories and populate the output df with
         self.columns = [
             "RGSM", "RGID",	"RGLB",	"RGPL",	"RGPU", "filename_one", "filename_two",
+            # Pre adapter trim stats
             "reads_pre_trim_one", "reads_pre_trim_two", "reads_pre_trim_total", "reads_post_trim_one",
-            "reads_post_trim_two", "reads_post_trim_total", "reads_trimmed_lost_one", "reads_trimmed_lost_two", "reads_trimmed_lost_total",
-            "reads_trimmed_lost_total_proportion", "reads_mapped", "reads_mapped_and_paired", "reads_unmapped",
-            "reads_mapped_proportion", "average_coverage", "average_coverage_stdev", "unpaired_reads_examined_for_deduplication",
-            "paired_reads_examined_for_deduplication", "unpaired_read_duplicated", "paired_read_duplicates", "proportion_duplication",
-            "sequenced_library_complexity", "estimated_library_complexity", "proportion_library_sequenced"
+            # Post adapter trim stats
+            "reads_post_trim_two", "reads_post_trim_total", "reads_trimmed_lost_one", "reads_trimmed_lost_two", "reads_trimmed_lost_total", "reads_trimmed_lost_total_proportion",
+            # Pre deduplication bam stats
+            "raw_total_sequences_pre_deduplication",	"reads_mapped_pre_deduplication",	"reads_mapped_and_paired_pre_deduplication",	"reads_unmapped_pre_deduplication",	"reads_mapped_proportion_pre_deduplication",
+            # Deduplication MarkDuplicatesSpark
+            "unread_pairs_examined_for_deduplication_markduplicatesspark", "read_pairs_examined_for_deduplication_markduplicatesspark", "unpaired_read_duplicated_markduplicatesspark",
+            "read_pair_duplicates_markduplicatesspark", "proportion_duplication_markduplicatesspark", "estimated_library_complexity_markduplicatesspark", "proportion_library_sequenced_markduplicatesspark",
+            # Deduplication EstimateLibraryComplexity
+            "read_pairs_examined_estimatelibrarycomplexity", "read_pair_duplicates_estimate_library_complexity", "proportion_duplication_estimatelibrarycomplexity",
+            "estimated_library_complexity_estimatelibrarycomplexity", "proportion_library_sequenced_estimatelibrarycomplexity",
+            # Post deduplication bam stats
+            "raw_total_sequences_post_deduplication", "reads_mapped_post_deduplication", "reads_mapped_and_paired_post_deduplication", "reads_unmapped_post_deduplication", "reads_mapped_proportion_post_deduplication",
+            # Coverage stats
+            "average_coverage", "average_coverage_stdev",
             ]
 
         self.meta_info_df = pd.read_csv(self.tsv_path, sep="\t")
@@ -47,12 +57,22 @@ class PreProcSummary:
         self.summary_df = pd.DataFrame.from_dict(orient="index", columns=self.columns, data=meta_info_dict)
 
     def populate_summary_dict(self):
-        # Go metric by metric
-        # Pre trim reads
-        # <td>Total Sequences</td><td>10788937</td>
-        pre_trim_file_list = [_ for _ in os.listdir(self.cwd) if _.endswith(".pre_trim.fastqc.html")]
-        # Find the file that we should be working with
+      
+        self._post_trim_seq_counts(self)
+
+        self._mapping_stats_pre_deduplication(self)
+
+        self._markduplicatesspark_complexity(self)
+        
+        self._estimatelibrarycomplexity_complexity(self)
+        
+        self._mapping_stats_post_deduplication(self)      
+
+        self.summary_df.to_csv(os.path.join(self.cwd, "preprocessing_overview.tsv"), sep="\t", index=False)
+
+    def _pre_trim(self):
         print("Collecting pre-trimming seq counts")
+        pre_trim_file_list = [_ for _ in os.listdir(self.cwd) if _.endswith(".pre_trim.fastqc.html")]
         for sample in self.summary_df.index:
             print(f"\r{sample}", end="")
             # Do read 1
@@ -67,10 +87,118 @@ class PreProcSummary:
             self.summary_df.at[sample, "reads_pre_trim_total"] = self.summary_df.at[sample, "reads_pre_trim_one"] + self.summary_df.at[sample, "reads_pre_trim_two"]
         print("\n")
 
-        # Here the pre trim should be done.
+    def _coverage_stats(self):
+        print("Collecting coverage stats")
+        coverage_stats_file_list = [_ for _ in os.listdir(self.cwd) if _.endswith(".depth.txt")]
+        for sample in self.summary_df.index:
+            print(f"\r{sample}", end="")
+            read_name=self.summary_df.at[sample, "filename_one"]
+            mapping_file = self._find_item_match(seq_file_name=read_name, list_of_objects=coverage_stats_file_list)
+            average_coverage = None
+            coverage_stdev = None
+            with open(os.path.join(self.cwd, mapping_file), "r") as f:
+                for line in [_.rstrip() for _ in f]:
+                    if "Average" in line:
+                        average_coverage = float(re.search('([0-9]+\.[0-9]+)', line).group(0))
+                    elif "Stdev" in line:
+                        coverage_stdev = float(re.search('([0-9]+\.[0-9]+)', line).group(0))
+            if average_coverage is None or coverage_stdev is None:
+                raise RuntimeError(f"Error in extracting coverage stats for {sample}")
+            self.summary_df.at[sample, "average_coverage"] = average_coverage
+            self.summary_df.at[sample, "average_coverage_stdev"] = coverage_stdev
+        print("\n")
 
-        # Now the post
-        # All of the fastqc files are named with the R1 string. The R1 and R2 are differentiated by 1U and 2U and 1P and 2P
+    def _mapping_stats_post_deduplication(self):
+        print("Collecting mapping stats post deduplication")
+        post_dedup_mapping_stats_file_list = [_ for _ in os.listdir(self.cwd) if _.endswith("bam.postdedup.stats.txt")]
+        for sample in self.summary_df.index:
+            raw_total_sequences, reads_mapped,  reads_mapped_and_paired, reads_unmapped = self._extract_bam_stats(self, sample=sample, file_list=post_dedup_mapping_stats_file_list)
+            self.summary_df.at[sample, "raw_total_sequences_post_deduplication"] = raw_total_sequences
+            self.summary_df.at[sample, "reads_mapped_post_deduplication"] = reads_mapped
+            self.summary_df.at[sample, "reads_mapped_and_paired_post_deduplication"] = reads_mapped_and_paired
+            self.summary_df.at[sample, "reads_unmapped_post_deduplication"] = reads_unmapped
+            self.summary_df.at[sample, "reads_mapped_proportion_post_deduplication"] = reads_mapped/raw_total_sequences
+        print("\n")
+
+    def _estimatelibrarycomplexity_complexity(self):
+        print("Collecting EstimateLibraryComplexity stats")
+        duplicate_stats_file_list = [_ for _ in os.listdir(self.cwd) if _.endswith(".estlibcomp.txt")]
+        for sample in self.summary_df.index:
+            print(f"\r{sample}", end="")
+            read_name=self.summary_df.at[sample, "filename_one"]
+            duplicate_file = self._find_item_match(seq_file_name=read_name, list_of_objects=duplicate_stats_file_list)
+            with open(os.path.join(self.cwd, duplicate_file), "r") as f:
+                lines = [_.rstrip() for _ in f]
+            for i, line in enumerate(lines):
+                if line.startswith("LIBRARY"):
+                    components = lines[i+1].split()
+                    READ_PAIRS_EXAMINED = int(components[2])
+                    READ_PAIR_DUPLICATES = int(components[6])
+                    PERCENT_DUPLICATION = float(components[8])
+                    ESTIMATED_LIBRARY_SIZE = int(components[9])
+                    break
+
+            self.summary_df.at[sample, "read_pairs_examined_estimatelibrarycomplexity"] = READ_PAIRS_EXAMINED
+            self.summary_df.at[sample, "read_pair_duplicates_estimate_library_complexity"] = READ_PAIR_DUPLICATES
+            self.summary_df.at[sample, "proportion_duplication_estimatelibrarycomplexity"] = PERCENT_DUPLICATION
+
+            # NB the complexity estimates are calculated using the MarkDuplicates from GATK and so are based only on the mapped reads (paired and unpaired)
+            # As such, the sequenced_library_complexity is the reads_mapped statistic from the samtools stats output that was run on the deduplicated
+            # bam file.
+            self.summary_df.at[sample, "estimated_library_complexity_estimatelibrarycomplexity"] = ESTIMATED_LIBRARY_SIZE
+            self.summary_df.at[sample, "proportion_library_sequenced_estimatelibrarycomplexity"] = (READ_PAIRS_EXAMINED - READ_PAIR_DUPLICATES) / ESTIMATED_LIBRARY_SIZE
+        print("\n")
+
+    def _markduplicatesspark_complexity(self):
+        print("Collecting MarkDuplicatesSpark complexity stats")
+        mark_dup_spark_deduplicate_stats_file_list = [_ for _ in os.listdir(self.cwd) if _.endswith(".merged.deduplicated.sorted.metrics.txt")]
+        for sample in self.summary_df.index:
+            print(f"\r{sample}", end="")
+            read_name=self.summary_df.at[sample, "filename_one"]
+            duplicate_file = self._find_item_match(seq_file_name=read_name, list_of_objects=mark_dup_spark_deduplicate_stats_file_list)
+            with open(os.path.join(self.cwd, duplicate_file), "r") as f:
+                lines = [_.rstrip() for _ in f]
+            for i, line in enumerate(lines):
+                if line.startswith("LIBRARY"):
+                    components = lines[i+1].split()
+                    unpaired_reads_examined_for_deduplication = int(components[1])
+                    read_pairs_examined_for_deduplication = int(components[2])
+                    unpaired_read_duplicated = int(components[5])
+                    paired_read_duplicates = int(components[6])
+                    proportion_duplication = float(components[8])
+                    estimated_library_complexity = int(components[9])
+                    break
+            
+            self.summary_df.at[sample, "unread_pairs_examined_for_deduplication_markduplicatesspark"] = unpaired_reads_examined_for_deduplication
+            self.summary_df.at[sample, "read_pairs_examined_for_deduplication_markduplicatesspark"] = read_pairs_examined_for_deduplication
+            self.summary_df.at[sample, "unpaired_read_duplicated_markduplicatesspark"] = unpaired_read_duplicated
+            self.summary_df.at[sample, "read_pair_duplicates_markduplicatesspark"] = paired_read_duplicates
+            self.summary_df.at[sample, "proportion_duplication_markduplicatesspark"] = proportion_duplication
+
+            # NB the complexity estimates are calculated using the MarkDuplicates from GATK and so are based only on the mapped reads (paired and unpaired)
+            # As such, the sequenced_library_complexity is the reads_mapped statistic from the samtools stats output that was run on the deduplicated
+            # bam file.
+            self.summary_df.at[sample, "estimated_library_complexity_markduplicatesspark"] = estimated_library_complexity
+            # Because the sequence complexity estimate is the number of sequences (not reads!; i.e. a sequence needs two reads)
+            # we will calculate the proportion of library seuquenced based on the number of unique read pairs
+            sequenced_complexity = (read_pairs_examined_for_deduplication - paired_read_duplicates)
+            self.summary_df.at[sample, "proportion_library_sequenced_markduplicatesspark"] = sequenced_complexity / estimated_library_complexity
+        print("\n")
+
+    def _mapping_stats_pre_deduplication(self):
+        print("Collecting mapping stats pre deduplication")
+        pre_dedup_mapping_stats_file_list = [_ for _ in os.listdir(self.cwd) if _.endswith("bam.prededup.stats.txt")]
+        for sample in self.summary_df.index:
+            raw_total_sequences, reads_mapped,  reads_mapped_and_paired, reads_unmapped = self._extract_bam_stats(self, sample=sample, file_list=pre_dedup_mapping_stats_file_list)
+
+            self.summary_df.at[sample, "raw_total_sequences_pre_deduplication"] = raw_total_sequences
+            self.summary_df.at[sample, "reads_mapped_pre_deduplication"] = reads_mapped
+            self.summary_df.at[sample, "reads_mapped_and_paired_pre_deduplication"] = reads_mapped_and_paired
+            self.summary_df.at[sample, "reads_unmapped_pre_deduplication"] = reads_unmapped
+            self.summary_df.at[sample, "reads_mapped_proportion_pre_deduplication"] = reads_mapped/raw_total_sequences
+        print("\n")
+
+    def _post_trim_seq_counts(self):
         print("Collecting post-trimming seq counts")
         post_trim_file_list = [_ for _ in os.listdir(self.cwd) if _.endswith("_fastqc.html")]
         for sample in self.summary_df.index:
@@ -95,84 +223,27 @@ class PreProcSummary:
             self.summary_df.at[sample, "reads_trimmed_lost_total_proportion"] = self.summary_df.at[sample, "reads_trimmed_lost_total"] / self.summary_df.at[sample, "reads_pre_trim_total"]
         print("\n")
 
-        print("Collecting mapping stats")
-        mapping_stats_file_list = [_ for _ in os.listdir(self.cwd) if _.endswith("bam.stats.txt")]
-        for sample in self.summary_df.index:
-            print(f"\r{sample}", end="")
-            read_name=self.summary_df.at[sample, "filename_one"]
-            mapping_file = self._find_item_match(seq_file_name=read_name, list_of_objects=mapping_stats_file_list)
-            
-            reads_mapped = None
-            reads_mapped_and_paired = None
-            reads_unmapped = None
-            with open(os.path.join(self.cwd, mapping_file), "r") as f:
-                for line in [_.rstrip() for _ in f]:
-                    if "reads mapped and paired" in line:
-                        reads_mapped_and_paired = int(re.search('([0-9]+)', line).group(0))
-                    elif "reads mapped" in line:
-                        reads_mapped = int(re.search('([0-9]+)', line).group(0))
-                    elif "reads unmapped" in line:
-                        reads_unmapped = int(re.search('([0-9]+)', line).group(0))
-            if reads_mapped is None or reads_mapped_and_paired is None or reads_unmapped is None:
-                raise RuntimeError(f"Error extracting the mapping stats for {sample}")
-
-            self.summary_df.at[sample, "reads_mapped"] = reads_mapped
-            self.summary_df.at[sample, "reads_mapped_and_paired"] = reads_mapped_and_paired
-            self.summary_df.at[sample, "reads_unmapped"] = reads_unmapped
-            self.summary_df.at[sample, "reads_mapped_proportion"] = 1 - (reads_unmapped/reads_mapped)
-        print("\n")
-
-        print("Collecting coverage stats")
-        coverage_stats_file_list = [_ for _ in os.listdir(self.cwd) if _.endswith(".depth.txt")]
-        for sample in self.summary_df.index:
-            print(f"\r{sample}", end="")
-            read_name=self.summary_df.at[sample, "filename_one"]
-            mapping_file = self._find_item_match(seq_file_name=read_name, list_of_objects=coverage_stats_file_list)
-            average_coverage = None
-            coverage_stdev = None
-            with open(os.path.join(self.cwd, mapping_file), "r") as f:
-                for line in [_.rstrip() for _ in f]:
-                    if "Average" in line:
-                        average_coverage = float(re.search('([0-9]+\.[0-9]+)', line).group(0))
-                    elif "Stdev" in line:
-                        coverage_stdev = float(re.search('([0-9]+\.[0-9]+)', line).group(0))
-            if average_coverage is None or coverage_stdev is None:
-                raise RuntimeError(f"Error in extracting coverage stats for {sample}")
-            self.summary_df.at[sample, "average_coverage"] = average_coverage
-            self.summary_df.at[sample, "average_coverage_stdev"] = coverage_stdev
-        print("\n")
-
-        print("Collecting complexity stats")
-        duplicate_stats_file_list = [_ for _ in os.listdir(self.cwd) if _.endswith(".metrics.txt")]
-        for sample in self.summary_df.index:
-            print(f"\r{sample}", end="")
-            read_name=self.summary_df.at[sample, "filename_one"]
-            duplicate_file = self._find_item_match(seq_file_name=read_name, list_of_objects=duplicate_stats_file_list)
-            with open(os.path.join(self.cwd, duplicate_file), "r") as f:
-                lines = [_.rstrip() for _ in f]
-            for i, line in enumerate(lines):
-                if line.startswith("LIBRARY"):
-                    components = lines[i+1].split()
-                    unpaired_reads_examined_for_deduplication = int(components[1])
-                    paired_reads_examined_for_deduplication = int(components[2])
-                    unpaired_read_duplicated = int(components[5])
-                    paired_read_duplicates = int(components[6])
-                    proportion_duplication = float(components[8])
-                    sequenced_library_complexity = int(components[9])
-                    break
-
-            self.summary_df.at[sample, "unpaired_reads_examined_for_deduplication"] = unpaired_reads_examined_for_deduplication
-            self.summary_df.at[sample, "paired_reads_examined_for_deduplication"] = paired_reads_examined_for_deduplication
-            self.summary_df.at[sample, "unpaired_read_duplicated"] = unpaired_read_duplicated
-            self.summary_df.at[sample, "paired_read_duplicates"] = paired_read_duplicates
-            self.summary_df.at[sample, "proportion_duplication"] = proportion_duplication
-
-            self.summary_df.at[sample, "sequenced_library_complexity"] = (self.summary_df.at[sample, "reads_mapped"] + self.summary_df.at[sample, "reads_unmapped"]) - ((self.summary_df.at[sample, "reads_mapped"] + self.summary_df.at[sample, "reads_unmapped"]) * proportion_duplication)
-            self.summary_df.at[sample, "estimated_library_complexity"] = sequenced_library_complexity
-            self.summary_df.at[sample, "proportion_library_sequenced"] = self.summary_df.at[sample, "sequenced_library_complexity"] / self.summary_df.at[sample, "estimated_library_complexity"]
-        print("\n")
-
-        self.summary_df.to_csv(os.path.join(self.cwd, "preprocessing_overview.tsv"), sep="\t", index=False)
+    def _extract_bam_stats(self, sample, file_list):
+        print(f"\r{sample}", end="")
+        read_name=self.summary_df.at[sample, "filename_one"]
+        mapping_file = self._find_item_match(seq_file_name=read_name, list_of_objects=file_list)
+        raw_total_sequences = None
+        reads_mapped = None
+        reads_mapped_and_paired = None
+        reads_unmapped = None
+        with open(os.path.join(self.cwd, mapping_file), "r") as f:
+            for line in [_.rstrip() for _ in f]:
+                if "raw total sequences" in line:
+                    raw_total_sequences = int(re.search('([0-9]+)', line).group(0))
+                elif "reads mapped and paired" in line:
+                    reads_mapped_and_paired = int(re.search('([0-9]+)', line).group(0))
+                elif "reads mapped" in line:
+                    reads_mapped = int(re.search('([0-9]+)', line).group(0))
+                elif "reads unmapped" in line:
+                    reads_unmapped = int(re.search('([0-9]+)', line).group(0))
+        if raw_total_sequences is None or reads_mapped is None or reads_mapped_and_paired is None or reads_unmapped is None:
+            raise RuntimeError(f"Error extracting the mapping stats for {sample}")
+        return raw_total_sequences, reads_mapped, reads_mapped_and_paired, reads_unmapped
 
     def _extract_seq_count_from_html(self, read_name, list_of_objects, base_data_dir, must_contain=""):
         matched_file = self._find_item_match(seq_file_name=read_name, list_of_objects=list_of_objects, must_contain=must_contain)
