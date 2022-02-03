@@ -153,26 +153,30 @@ if (params.subsample){
     fastqc_pre_trim_publish_dir = [params.output_dir, "fastqc_pre_trim_sub_${params.subsample_depth}"].join(File.separator)
     fastqc_post_trim_publish_dir = [params.output_dir, "fastqc_post_trim_sub_${params.subsample_depth}"].join(File.separator)
     markduplicates_metrics_publishDir = [params.output_dir, "markduplicates_metrics_sub_${params.subsample_depth}"].join(File.separator)
+    estimatelibrarycomplexity_metrics_publishDir = [params.output_dir, "estimatelibrarycomplexity_metrics_sub_${params.subsample_depth}"].join(File.separator)
     output_bam_publishDir = [params.output_dir, "output_bams_sub_${params.subsample_depth}"].join(File.separator)
     pre_seq_c_curve_publish_dir = [params.output_dir, "pre_seq_c_curve_sub_${params.subsample_depth}"].join(File.separator)
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics_sub_${params.subsample_depth}"].join(File.separator)
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient_sub_${params.subsample_depth}"].join(File.separator)
     mosdepth_sequencing_coverage_publishDir = [params.output_dir, "mosdepth_sequencing_coverage_sub_${params.subsample_depth}"].join(File.separator)
     samtools_coverage_stats_publishDir = [params.output_dir, "samtools_coverage_stats_sub_${params.subsample_depth}"].join(File.separator)
-    samtools_mapping_stats_publishDir = [params.output_dir, "samtools_mapping_stats_sub_${params.subsample_depth}"].join(File.separator)
+    samtools_mapping_stats_prededup_publishDir = [params.output_dir, "samtools_mapping_stats_prededup_sub_${params.subsample_depth}"].join(File.separator)
+    samtools_mapping_stats_postdedup_publishDir = [params.output_dir, "samtools_mapping_stats_postdedup_sub_${params.subsample_depth}"].join(File.separator)
     preprocessing_summary_publishDir = [params.output_dir, "preprocessing_summary_sub_${params.subsample_depth}"].join(File.separator)
 }else{
     params.output_dir = "${workflow.launchDir}/outputs/pre_processing"
     fastqc_pre_trim_publish_dir = [params.output_dir, "fastqc_pre_trim"].join(File.separator)
     fastqc_post_trim_publish_dir = [params.output_dir, "fastqc_post_trim"].join(File.separator)
     markduplicates_metrics_publishDir = [params.output_dir, "markduplicates_metrics"].join(File.separator)
+    estimatelibrarycomplexity_metrics_publishDir = [params.output_dir, "estimatelibrarycomplexity_metrics"].join(File.separator)
     output_bam_publishDir = [params.output_dir, "output_bams"].join(File.separator)
     pre_seq_c_curve_publish_dir = [params.output_dir, "pre_seq_c_curve"].join(File.separator)
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics"].join(File.separator)
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient"].join(File.separator)
     mosdepth_sequencing_coverage_publishDir = [params.output_dir, "mosdepth_sequencing_coverage"].join(File.separator)
     samtools_coverage_stats_publishDir = [params.output_dir, "samtools_coverage_stats"].join(File.separator)
-    samtools_mapping_stats_publishDir = [params.output_dir, "samtools_mapping_stats"].join(File.separator)
+    samtools_mapping_stats_prededup_publishDir = [params.output_dir, "samtools_mapping_stats_prededup"].join(File.separator)
+    samtools_mapping_stats_postdedup_publishDir = [params.output_dir, "samtools_mapping_stats_postdedup"].join(File.separator)
     preprocessing_summary_publishDir = [params.output_dir, "preprocessing_summary"].join(File.separator)
 }
 
@@ -434,7 +438,7 @@ process add_read_group_headers{
     tuple val(pair_id), file(merged), file(merged_bai), val(read_group_string) from add_read_group_headers_ch.join(Channel.fromList(read_group_map))
 
     output:
-    tuple val(pair_id), file("${pair_id}.merged.mapped.readGroupHeaders.bam"), file("${pair_id}.merged.mapped.readGroupHeaders*.bai") into mark_duplicates_ch, mapping_stats_pre_dup_ch
+    tuple val(pair_id), file("${pair_id}.merged.mapped.readGroupHeaders.bam"), file("${pair_id}.merged.mapped.readGroupHeaders*.bai") into mark_duplicates_ch, mapping_stats_prededup_ch
 
     script:
     """
@@ -444,14 +448,14 @@ process add_read_group_headers{
 
 process samtools_mapping_stats_pre_deduplication{
     tag "${sample}"
-    publishDir samtools_mapping_stats_publishDir, mode: "copy"
+    publishDir samtools_mapping_stats_prededup_publishDir, mode: "copy"
     container 'singlecellpipeline/samtools:v0.0.3'
 
     input:
-    tuple val(sample), path(bam), path(bai) from mapping_stats_pre_dup_ch
+    tuple val(sample), path(bam), path(bai) from mapping_stats_prededup_ch
 
     output:
-    path "${sample}.bam.prededup.stats.txt" into samtools_stats_pre_dedup_out
+    path "${sample}.bam.prededup.stats.txt" into samtools_stats_prededup_out
 
     script:
     """
@@ -462,6 +466,13 @@ process samtools_mapping_stats_pre_deduplication{
 // NB when running a singularity profile we get errors relating to port number conflicts.
 // To prevent this we set spark.port.maxRetries to be the number of samples
 // This does not appear to be an issue when running a docker profile.
+// NB MarkDuplicatesSpark estimation of library complexity is based on only the mapped reads
+// and is based on mapping position.
+// By contrast EstimateLibraryComplexity is not based on mapping and so uses mapped and non-mapped
+// paried reads. They can give very different results. We were in particular seeing
+// that the MarkDuplicatesSpark estimate is strongly effected by the quality/proportion of reads
+// mapping to reference genome. As such we will include both methods here and report them
+// in the preprocessing summary output.
 process markduplicates_spark{
     tag "${pair_id}"
     container 'broadinstitute/gatk:4.2.4.1'
@@ -473,7 +484,7 @@ process markduplicates_spark{
     tuple val(pair_id), file(merged), file(merged_bai) from mark_duplicates_ch
 
     output:
-    tuple val(pair_id), file("${pair_id}.merged.deduplicated.sorted.bam{,.bai}") into collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mosdepth_sequencing_coverage_ch,samtools_depth_stats_ch,samtools_mapping_stats_ch,perprocess_overview_bams_ch
+    tuple val(pair_id), file("${pair_id}.merged.deduplicated.sorted.bam{,.bai}") into collect_gc_bias_metrics_ch,pcr_bottleneck_coefficient_ch,mosdepth_sequencing_coverage_ch,samtools_depth_stats_ch,samtools_mapping_stats_postdedup_ch,perprocess_overview_bams_ch
     file("${pair_id}.merged.deduplicated.sorted.metrics.txt") into mark_duplicate_metrics_ch
 
     script:
@@ -481,6 +492,24 @@ process markduplicates_spark{
     gatk MarkDuplicatesSpark --java-options "-XX:ParallelGCThreads=1 -XX:ConcGCThreads=1" --create-output-bam-index true --remove-all-duplicates -I ${merged} -O ${pair_id}.merged.deduplicated.sorted.bam -M ${pair_id}.merged.deduplicated.sorted.metrics.txt --conf 'spark.port.maxRetries=${num_samples}' --spark-master local[${task.cpus}]
     """
 }
+
+process estimate_library_complexity{
+    tag "${pair_id}"
+    container 'broadinstitute/gatk:4.2.4.1'
+    publishDir estimatelibrarycomplexity_metrics_publishDir, pattern: "*.metrics.txt", mode: 'copy'
+
+    input:
+    tuple val(pair_id), file(merged), file(merged_bai) from mark_duplicates_ch
+
+    output:
+    file("${pair_id}.estlibcomp.txt") into est_lib_comp_metrics_ch
+
+    script:
+    """
+    gatk EstimateLibraryComplexity --java-options "-XX:ParallelGCThreads=1 -XX:ConcGCThreads=1" -I ${merged} -O ${pair_id}.estlibcomp.txt
+    """
+}
+
 // END OF PRE PROCESSING
 
 // // START OF EVALUATION METRICS
@@ -574,14 +603,14 @@ process mosdepth_plot_seq_coverage{
 
 process samtools_mapping_stats_post_deduplication{
     tag "${sample}"
-    publishDir samtools_mapping_stats_publishDir, mode: "copy"
+    publishDir samtools_mapping_stats_postdedup_publishDir, mode: "copy"
     container 'singlecellpipeline/samtools:v0.0.3'
 
     input:
-    tuple val(sample), path(bam) from samtools_mapping_stats_ch
+    tuple val(sample), path(bam) from samtools_mapping_stats_postdedup_ch
 
     output:
-    path "${sample}.bam.postdedup.stats.txt" into samtools_stats_out
+    path "${sample}.bam.postdedup.stats.txt" into samtools_stats_postdedup_out
 
     script:
     """
@@ -616,9 +645,10 @@ process preprocess_summary{
     path posttrim from ch_fastqc_post_trim_output.collect()
     path bams from perprocess_overview_bams_ch.collect{it[1]}
     path depth from samtools_depth_out.collect()
-    path postdedup_stats from samtools_stats_out.collect()
+    path postdedup_stats from samtools_stats_postdedup_out.collect()
     path duplication_metric from mark_duplicate_metrics_ch.collect()
-    path prededup_stats from samtools_stats_pre_dedup_out.collect()
+    path prededup_stats from samtools_stats_prededup_out.collect()
+    path est_lib_comp from est_lib_comp_metrics_ch.collect()
     path input_tsv
     
     output:
