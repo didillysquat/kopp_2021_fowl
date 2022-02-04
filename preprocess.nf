@@ -428,7 +428,7 @@ process merge_paired_and_unpaired{
 
     script:
     """
-    gatk --java-options "-XX:ParallelGCThreads=1 -XX:ConcGCThreads=1" MergeSamFiles --CREATE_INDEX --INPUT $paired --INPUT $unpaired_one --INPUT $unpaired_two --OUTPUT ${pair_id}.merged.mapped.bam
+    gatk --java-options "-XX:ParallelGCThreads=1 -XX:ConcGCThreads=1" MergeSamFiles --SORT_ORDER coordinate --CREATE_INDEX --INPUT $paired --INPUT $unpaired_one --INPUT $unpaired_two --OUTPUT ${pair_id}.merged.mapped.bam
     """
 
 }
