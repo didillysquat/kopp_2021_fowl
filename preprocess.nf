@@ -159,7 +159,7 @@ if (params.subsample){
     markduplicates_metrics_publishDir = [params.output_dir, "markduplicates_metrics_sub_${params.subsample_depth}"].join(File.separator)
     estimatelibrarycomplexity_metrics_publishDir = [params.output_dir, "estimatelibrarycomplexity_metrics_sub_${params.subsample_depth}"].join(File.separator)
     output_bam_publishDir = [params.output_dir, "output_bams_sub_${params.subsample_depth}"].join(File.separator)
-    pre_seq_c_curve_publish_dir = [params.output_dir, "pre_seq_c_curve_sub_${params.subsample_depth}"].join(File.separator)
+    preseq_complexity_prediction_publishDir = [params.output_dir, "preseq_complexity_sub_${params.subsample_depth}"].join(File.separator)
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics_sub_${params.subsample_depth}"].join(File.separator)
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient_sub_${params.subsample_depth}"].join(File.separator)
     mosdepth_sequencing_coverage_publishDir = [params.output_dir, "mosdepth_sequencing_coverage_sub_${params.subsample_depth}"].join(File.separator)
@@ -174,7 +174,7 @@ if (params.subsample){
     markduplicates_metrics_publishDir = [params.output_dir, "markduplicates_metrics"].join(File.separator)
     estimatelibrarycomplexity_metrics_publishDir = [params.output_dir, "estimatelibrarycomplexity_metrics"].join(File.separator)
     output_bam_publishDir = [params.output_dir, "output_bams"].join(File.separator)
-    pre_seq_c_curve_publish_dir = [params.output_dir, "pre_seq_c_curve"].join(File.separator)
+    preseq_complexity_prediction_publishDir = [params.output_dir, "preseq_complexity"].join(File.separator)
     collect_gc_bias_metrics_publishDir = [params.output_dir, "collect_gc_bias_metrics"].join(File.separator)
     pcr_bottleneck_coefficient_publishDir = [params.output_dir, "pcr_bottleneck_coefficient"].join(File.separator)
     mosdepth_sequencing_coverage_publishDir = [params.output_dir, "mosdepth_sequencing_coverage"].join(File.separator)
@@ -442,11 +442,37 @@ process add_read_group_headers{
     tuple val(pair_id), file(merged), file(merged_bai), val(read_group_string) from add_read_group_headers_ch.join(Channel.fromList(read_group_map))
 
     output:
-    tuple val(pair_id), file("${pair_id}.merged.mapped.readGroupHeaders.bam"), file("${pair_id}.merged.mapped.readGroupHeaders*.bai") into mark_duplicates_ch, mapping_stats_prededup_ch, estimate_library_complexity_ch
+    tuple val(pair_id), file("${pair_id}.merged.mapped.readGroupHeaders.bam"), file("${pair_id}.merged.mapped.readGroupHeaders*.bai") into mark_duplicates_ch, mapping_stats_prededup_ch, estimate_library_complexity_ch, bamtobed_ch
 
     script:
     """
     gatk --java-options "-XX:ParallelGCThreads=1 -XX:ConcGCThreads=1" AddOrReplaceReadGroups --CREATE_INDEX true --INPUT ${merged} --OUTPUT ${pair_id}.merged.mapped.readGroupHeaders.bam ${read_group_string}
+    """
+}
+
+// NB the preseq c_curve and lc_extrap functions seem to be broken for
+// pe bam files. A work around is to convert the bam to a bed and supply
+// the bed as input to the two preseq functions.
+// I have made a container to do this in one process so that we can delete
+// the intermediary bed file as these are about the same size as the original
+// bam.
+process bamtobed_preseq{
+    tag "${pair_id}"
+    container "didillysquat/bedtools_preseq:latest"
+    publishDir preseq_complexity_prediction_publishDir, mode: "copy"
+
+    input:
+    tuple val(pair_id), file(bam), file(bai) from bamtobed_ch
+
+    output:
+    tuple val(pair_id), file("${pair_id}.c_curve.txt"), file("${pair_id}.lc_extrap.txt") into preseq_out_ch
+
+    script:
+    """
+    bedtools bamtobed -i $bam > ${pair_id}.merged.mapped.readGroupHeaders.bed
+    preseq c_curve -P ${pair_id}.merged.mapped.readGroupHeaders.bed > ${pair_id}.c_curve.txt
+    preseq lc_extrap -P ${pair_id}.merged.mapped.readGroupHeaders.bed > ${pair_id}.lc_extrap.txt
+    rm ${pair_id}.merged.mapped.readGroupHeaders.bed
     """
 }
 
