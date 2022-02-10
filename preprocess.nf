@@ -465,7 +465,7 @@ process bamtobed_preseq{
     tuple val(pair_id), file(bam), file(bai) from bamtobed_ch
 
     output:
-    tuple val(pair_id), file("${pair_id}.c_curve.txt"), file("${pair_id}.lc_extrap.txt") into preseq_out_ch
+    tuple file("${pair_id}.c_curve.txt"), file("${pair_id}.lc_extrap.txt") into preseq_out_ch
 
     script:
     """
@@ -475,6 +475,30 @@ process bamtobed_preseq{
     rm ${pair_id}.merged.mapped.readGroupHeaders.bed
     """
 }
+
+// We will plot up a single figure that contains all of the 
+// c_cures and lc_extrap cures in a single figure
+// If users want a plot for each sample they will be able to make this from
+// individual c_curve.txt and lc_extrap.txt files that were published from 
+// the bamtobed_preseq process above.
+process plot_preseq_complexity_curves{
+    tag "plot_preseq_complexity_curves"
+    container "didillysquat/r_multipurpose:latest"
+    publishDir preseq_complexity_prediction_publishDir, mode: "copy"
+
+    input:
+    path curve_files from preseq_out_ch.collect()
+
+    output:
+    file "library.complexity.png" into plot_preseq_complexity_curves_out_ch
+
+    script:
+    """
+    Rscript ${bin_dir}/plot_preseq_lib_complex.r \$PWD
+    """
+
+}
+
 
 process samtools_mapping_stats_pre_deduplication{
     tag "${sample}"

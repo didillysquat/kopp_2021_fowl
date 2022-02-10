@@ -108,6 +108,7 @@ nextflow run relatedness.nf -profile <docker|singularity> --gatk_vcfgz </path/to
 - Read merging [[gatk MergeSamFiles](https://gatk.broadinstitute.org/hc/en-us/articles/360046788832-MergeSamFiles-Picard-)]
 - Annotation with read group headers [[gatk AddOrReplaceReadGroups](https://gatk.broadinstitute.org/hc/en-us/articles/360041850851-AddOrReplaceReadGroups-Picard-)]
 - Remove duplicate reads [[gatk MarkDuplicatesSpark](https://gatk.broadinstitute.org/hc/en-us/articles/360057438771-MarkDuplicatesSpark)]
+- Library complexity stats [[gatk MarkDuplicatesSpark](https://gatk.broadinstitute.org/hc/en-us/articles/360057438771-MarkDuplicatesSpark), [gatk EstimateLibraryComplexity](https://gatk.broadinstitute.org/hc/en-us/articles/4418054218779-EstimateLibraryComplexity-Picard-), [preseq c_curve](https://github.com/smithlabcode/preseq), [preseq lc_extrap](https://github.com/smithlabcode/preseq)]
 - Collect read metrics [GC metrics: [gatk CollectGcBiasMetrics](https://gatk.broadinstitute.org/hc/en-us/articles/360057440351-CollectGcBiasMetrics-Picard-), PCR bottleneck coefficient, sequencing coverage: [mosdepth](https://github.com/brentp/mosdepth), sequencing coverage: [samtools depth](http://www.htslib.org/doc/samtools-depth.html), mapping stats: [samtools stats](http://www.htslib.org/doc/samtools-stats.html)]
 
 #### **preprocess.nf alternative options**
@@ -224,8 +225,6 @@ The full paths to each of the fastq.gz files is specified in the input tsv (see 
 #### **preprocess.nf arguments**
 [Required Aguments]
 
-`--input_dir`: The full path to the directory containing the input fastq.gz paired files
-
 `--ref`: The full path to the reference genome assembly. It should be decompressed and in fasta format.
 
 `--input_tsv`: The full path to the tab delimited file containing read group information. [example readgroup info tsv](resources/read_groups.tsv)
@@ -245,6 +244,10 @@ This option is useful during testing and development.
 
 **markduplicates_metrics**: Metrics file produced by gatk MarkDuplicatesSpark
 
+**estimatelibrarycomplexity_metrics**: Metrics file produced by gatk EstimateLibraryComplexity
+
+**preseq_complexity**: c_curve and lc_extrap output files and a summary plot
+
 **output_bams**: The analysis-ready BAMs output from the pipeline.
 
 **collect_gc_bias_metrics**: GC bias metrics
@@ -253,7 +256,9 @@ This option is useful during testing and development.
 
 **mosdepth_sequencing_coverage**: Sequence coverage / depth results
 
-**samtools_mapping_stats**: Samtools mapping statistics
+**samtools_mapping_stats_prededup**: Samtools mapping statistics before duplicate removal
+
+**samtools_mapping_stats_postdedup**: Samtools mapping statistics on duplicates-removed bams
 
 **samtools_coverage_stats**: Samtools coverage statistics
 
