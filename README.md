@@ -66,6 +66,10 @@ Install [Nextflow](https://www.nextflow.io/docs/latest/getstarted.html).
 
 Install one of [Singularity](https://singularity.lbl.gov/install-linux) of [Docker](https://docs.docker.com/get-docker/).
 
+N.B. This pipeline has been tested more thoroughly with Singularity than Docker, so we recommend running with Singularity where possible.
+
+Running with docker may require some tweaking of the `workflow.containerEngine` directive. 
+
 Provide your chosen container management system at the profile flag e.g.:
 `-profile singularity` or `-profile docker`.
 
