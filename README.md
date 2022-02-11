@@ -189,6 +189,11 @@ It:
 - Thins the sets of variants [vcftools](https://vcftools.github.io/man_latest.html) (`--remove-filtered-all --remove-indels --maf 0.025 --recode --recode-INFO-all --stdout --max-missing 0.75`)
 - Computes relatedness results.
 
+Optionally it can also compute a PCA for the samples.
+It does this using [ANGSD](http://www.popgen.dk/angsd/index.php/ANGSD) and [PCAngsd](http://www.popgen.dk/software/index.php/PCAngsd).
+The full path to the directory containing only the bams to be used as input for the PCA should be provided
+in the nextflow.config file to the variable bam_dir_for_PCA.
+
 ## Documentation
 
 ### General documentation
@@ -358,6 +363,11 @@ It:
 - Thins the sets of variants [vcftools](https://vcftools.github.io/man_latest.html) (`--remove-filtered-all --remove-indels --maf 0.025 --recode --recode-INFO-all --stdout --max-missing 0.75`)
 - Computes relatedness results.
 
+Optionally it can also compute a PCA for the samples.
+It does this using [ANGSD](http://www.popgen.dk/angsd/index.php/ANGSD) and [PCAngsd](http://www.popgen.dk/software/index.php/PCAngsd).
+The full path to the directory containing only the bams to be used as input for the PCA should be provided
+in the nextflow.config file to the variable bam_dir_for_PCA.
+
 #### **relatedness.nf arguments**
 
 [Required Arguments]
@@ -376,6 +386,8 @@ It:
 
 `--ngsrelate_threads <int>`: Number of threads to use for NgsRealte.
 
+`--bam_dir_for_PCA <string>`: Full path to the directory where the bams to make the PCAs from are located
+
 #### **relatedness.nf outputs**
 
 **thinned_vcf**: The thinned .vcf file used as input to the to the relateness calculations.
@@ -385,3 +397,5 @@ It:
 **lcmlkin**: Outputs from the lcmlkin
 
 **ngsrelate**: Outputs from NgsRelate
+
+**PCA**: Outputs for computation of the PCA including the principal components, the eigen values, the covariance matrix and a summary plot.
