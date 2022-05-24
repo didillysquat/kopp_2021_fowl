@@ -456,6 +456,8 @@ process add_read_group_headers{
 // I have made a container to do this in one process so that we can delete
 // the intermediary bed file as these are about the same size as the original
 // bam.
+// 20220215 see https://github.com/smithlabcode/preseq/issues/59
+// https://github.com/smithlabcode/preseq/issues/57
 process bamtobed_preseq{
     tag "${pair_id}"
     container "didillysquat/bedtools_preseq:latest"
